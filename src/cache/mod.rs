@@ -1,3 +1,2 @@
+#[allow(dead_code)]
 mod embeddings;
-
-pub use embeddings::EmbeddingCache;

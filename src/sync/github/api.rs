@@ -32,6 +32,7 @@ pub struct GhLabel {
 
 #[derive(Deserialize, Debug)]
 pub struct GhPullRequestRef {
+    #[allow(dead_code)]
     pub html_url: String,
 }
 

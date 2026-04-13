@@ -150,6 +150,7 @@ impl OnnxEmbedder {
     }
 
     /// Embed a single text string, returning a normalized vector.
+    #[allow(dead_code)]
     pub fn embed_one(&mut self, text: &str) -> Result<Vec<f32>> {
         let batch = self.embed_batch(&[text])?;
         Ok(batch.row(0).to_vec())
