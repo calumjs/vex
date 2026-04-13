@@ -58,6 +58,9 @@ vex "error handling" . -g "*.rs"
 # JSON output for scripting
 vex "config parsing" src/ --json
 
+# Bridge vocabulary gaps with --literal
+vex "code that prevents race conditions" --literal lock --literal mutex
+
 # Fast mode (binary quantization — less precise, but faster on huge codebases)
 vex "logging" . --fast
 ```
@@ -80,12 +83,41 @@ Files ──► Chunk (tree-sitter) ──► Embed (ONNX) ──►──┘
 
 ## Performance
 
-Embedding is the bottleneck on cold runs. The cache eliminates it on subsequent searches.
+Benchmarked on Snapdragon X Elite (12-core Oryon, ARM64):
 
-| Scenario | Time (36 chunks) |
-|----------|-----------------|
-| Cold (first search, no cache) | ~1.5s |
-| Warm (cached embeddings) | ~0.2s |
+| Codebase | Files | Chunks | Time |
+|----------|-------|--------|------|
+| Small (.NET app) | 585 | 3,227 | **468ms** |
+| Large (monorepo) | 19,366 | 35,579 | **729ms** |
+
+Uses BM25 pre-filtering + neural re-ranking: only the top candidates get embedded, keeping latency under 1 second regardless of codebase size.
+
+## Claude Code integration
+
+vex ships with a skill plugin for [Claude Code](https://claude.com/claude-code). Use `/vex` to search by meaning from any Claude session.
+
+**Project-level** (automatic for anyone cloning this repo):
+```
+.claude/skills/vex/SKILL.md  ← already included
+```
+
+**Global install** (available in all projects):
+```bash
+# Linux/macOS
+mkdir -p ~/.claude/skills/vex
+cp .claude/skills/vex/SKILL.md ~/.claude/skills/vex/
+
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills\vex"
+Copy-Item .claude\skills\vex\SKILL.md "$env:USERPROFILE\.claude\skills\vex\"
+```
+
+Then in Claude Code:
+```
+/vex error handling in authentication
+/vex database connection pooling
+/vex "race conditions" --literal lock
+```
 
 ## NPU / GPU acceleration
 
@@ -115,10 +147,11 @@ Other file types fall back to paragraph/sliding-window chunking.
 -t, --threshold <SCORE>  Minimum similarity score 0.0-1.0
 -C, --context <LINES>    Lines of context around match [default: 2]
 -g, --glob <PATTERN>     Only search files matching glob
+    --literal <TERM>     Boost files containing this keyword (repeatable)
     --fast               Binary quantization (faster, less precise)
     --no-cache           Skip embedding cache
     --json               JSON output
-    --device <DEVICE>    npu, gpu, cpu, auto [default: auto]
+    --device <DEVICE>    npu, cpu, auto [default: auto]
     --model-dir <PATH>   Custom model directory
     --no-color           Disable colored output
 ```
