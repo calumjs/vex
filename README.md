@@ -22,8 +22,23 @@ vex embeds your query and every chunk of code using a neural network, then ranks
 
 ## Install
 
+Requires [Rust](https://rustup.rs/).
+
 ```bash
 cargo install --git https://github.com/calumjs/vex
+```
+
+Then make sure `~/.cargo/bin` is on your PATH:
+
+**Windows (PowerShell, run once):**
+```powershell
+[Environment]::SetEnvironmentVariable("Path", $env:USERPROFILE + "\.cargo\bin;" + [Environment]::GetEnvironmentVariable("Path", "User"), "User")
+```
+Then restart your terminal.
+
+**Linux / macOS:** Add to your shell config (`~/.bashrc`, `~/.zshrc`, etc.):
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
 ```
 
 The model (~90 MB) downloads automatically on first run.
