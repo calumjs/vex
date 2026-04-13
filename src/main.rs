@@ -460,28 +460,90 @@ fn main() -> Result<()> {
         (0..all_chunks.len()).collect()
     };
 
-    // Embed query + candidates in a single batch to avoid double session.run() overhead.
+    // #3: Embedding cache — reuse embeddings from previous queries.
     let dim = embedder.dim();
-    let mut all_texts: Vec<&str> = Vec::with_capacity(1 + candidate_indices.len());
-    all_texts.push(&query);
-    for &i in &candidate_indices {
-        all_texts.push(all_chunks[i].text.as_str());
+    let mut embedding_cache = if !cli.no_cache {
+        cache::EmbeddingCache::open(dim).ok()
+    } else {
+        None
+    };
+
+    let mut var_query_arr: Option<Array1<f32>> = None;
+
+    // Separate candidates into cache hits and misses
+    let mut candidate_embeddings: Vec<Vec<f32>> = Vec::with_capacity(candidate_indices.len());
+    let mut miss_indices: Vec<usize> = Vec::new(); // indices into candidate_indices
+
+    for (ci, &chunk_idx) in candidate_indices.iter().enumerate() {
+        let text = all_chunks[chunk_idx].text.as_str();
+        if let Some(ref cache) = embedding_cache {
+            if let Some(cached) = cache.get(text) {
+                candidate_embeddings.push(cached.clone());
+                continue;
+            }
+        }
+        candidate_embeddings.push(Vec::new()); // placeholder
+        miss_indices.push(ci);
     }
 
-    let batch_size = 256;
-    let mut all_vecs: Vec<f32> = Vec::with_capacity(all_texts.len() * dim);
-    for batch in all_texts.chunks(batch_size) {
-        let batch_emb = embedder.embed_batch(batch)?;
-        for row in batch_emb.rows() {
-            all_vecs.extend(row.iter());
+    let cache_hits = candidate_indices.len() - miss_indices.len();
+
+    // Embed only cache misses + query (query is always re-embedded)
+    if !miss_indices.is_empty() || cache_hits == 0 {
+        let mut texts_to_embed: Vec<&str> = Vec::with_capacity(1 + miss_indices.len());
+        texts_to_embed.push(&query); // always embed query fresh
+        for &ci in &miss_indices {
+            texts_to_embed.push(all_chunks[candidate_indices[ci]].text.as_str());
+        }
+
+        let batch_size = 256;
+        let mut embedded: Vec<Vec<f32>> = Vec::new();
+        for batch in texts_to_embed.chunks(batch_size) {
+            let batch_emb = embedder.embed_batch(batch)?;
+            for row in batch_emb.rows() {
+                embedded.push(row.to_vec());
+            }
+        }
+
+        // First embedded row is the query
+        let query_vec = embedded.remove(0);
+
+        // Fill in cache misses and store in cache
+        for (i, &ci) in miss_indices.iter().enumerate() {
+            let emb = &embedded[i];
+            candidate_embeddings[ci] = emb.clone();
+            if let Some(ref mut cache) = embedding_cache {
+                let text = all_chunks[candidate_indices[ci]].text.as_str();
+                cache.put(text, emb.clone());
+            }
+        }
+
+        // Build query array
+        var_query_arr = Some(Array1::from_vec(query_vec));
+    }
+
+    // If everything was cached, still need to embed the query
+    let query_arr = if let Some(q) = var_query_arr {
+        q
+    } else {
+        let qe = embedder.embed_batch(&[&query])?;
+        Array1::from_vec(qe.row(0).to_vec())
+    };
+
+    // Build corpus matrix from candidate embeddings
+    let mut corpus_vecs: Vec<f32> = Vec::with_capacity(candidate_indices.len() * dim);
+    for emb in &candidate_embeddings {
+        corpus_vecs.extend(emb);
+    }
+    let corpus = ndarray::Array2::from_shape_vec((candidate_indices.len(), dim), corpus_vecs)?;
+    let embed_time = embed_start.elapsed();
+
+    // Save cache
+    if let Some(ref cache) = embedding_cache {
+        if let Err(e) = cache.save() {
+            eprintln!("vex: warning: failed to save cache: {e}");
         }
     }
-
-    // First row is query, rest are candidates
-    let query_arr = Array1::from_vec(all_vecs[..dim].to_vec());
-    let candidate_vecs = all_vecs[dim..].to_vec();
-    let corpus = ndarray::Array2::from_shape_vec((candidate_indices.len(), dim), candidate_vecs)?;
-    let embed_time = embed_start.elapsed();
 
     // Search within the candidates
     let search_start = Instant::now();
