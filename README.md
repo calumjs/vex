@@ -117,25 +117,105 @@ vex "build config" --hidden --no-gitignore
 
 ## Sync GitHub issues as searchable files
 
-Vex can sync GitHub issues and pull requests into local Markdown files, so you can search engineering discussions with the same workflow you use for code.
+Vex can sync GitHub issues and pull requests into local Markdown files, so you can search engineering discussions with the same workflow you use for code. No credentials needed for search — only for sync.
 
 ```bash
-# Auto-detect repo from current directory
+# Auto-detect repo from current directory (reads git remote)
 vex sync github
 
 # Explicit repo
 vex sync github calumjs/vex
 
-# Sync issues and PRs, open only
-vex sync github --include issues,prs --state open
+# Sync issues and PRs
+vex sync github --include issues,prs
 
-# Search synced issues
-vex "keyboard shortcuts" ~/.local/share/vex/sources/github/anthropics/claude-code/
+# Only open issues
+vex sync github --state open
+
+# Filter by labels
+vex sync github --labels bug,critical
+
+# Limit for testing
+vex sync github --limit 10
+
+# Force full re-sync (ignore watermark)
+vex sync github --force
 ```
 
-Auth: vex uses `gh auth token`, `GITHUB_TOKEN`, or `GH_TOKEN`. Credentials are only needed for sync — search runs locally over the materialized Markdown files.
+Then search the synced content like any other files:
 
-Subsequent syncs are incremental — only fetches items updated since the last sync.
+```bash
+# Search synced issues
+vex "PII redaction strategy" ~/.local/share/vex/sources/github/owner/repo/
+
+# Search just issues (not PRs)
+vex "login timeout" ~/.local/share/vex/sources/github/owner/repo/issues/
+
+# Search just PRs
+vex "refactor auth" ~/.local/share/vex/sources/github/owner/repo/prs/
+```
+
+### Auth
+
+Vex resolves credentials in order:
+1. **GitHub CLI** — `gh auth token` (recommended: just run `gh auth login`)
+2. **GITHUB_TOKEN** environment variable
+3. **GH_TOKEN** environment variable
+
+Credentials are only used during sync. Search runs locally over materialized Markdown.
+
+### Incremental sync
+
+Subsequent syncs only fetch items updated since the last sync. The watermark is stored in `.meta/sync-state.json`. Use `--force` to re-fetch everything.
+
+### Synced file format
+
+Each issue/PR becomes a Markdown file with YAML frontmatter:
+
+```
+issues/42-fix-login-timeout.md
+```
+
+```markdown
+---
+type: issue
+number: 42
+title: "Fix login timeout"
+state: open
+author: alice
+labels: [bug, auth]
+created: 2026-04-10T01:22:33Z
+updated: 2026-04-12T04:10:20Z
+url: https://github.com/owner/repo/issues/42
+---
+
+# Issue #42: Fix login timeout
+
+<body>
+
+---
+
+## Comments
+
+### @bob (2026-04-10T03:15:00Z)
+
+Can confirm in staging.
+```
+
+### Sync options
+
+```
+vex sync github [owner/repo]     Sync GitHub issues and PRs
+
+      --include <kinds>          issues, prs (comma-separated) [default: issues,prs]
+      --state <state>            open, closed, all [default: open]
+      --labels <labels>          Filter by labels (comma-separated)
+      --limit <n>                Max items to sync
+      --since <date>             ISO timestamp or "last"
+      --force                    Ignore watermark, re-fetch everything
+      --comments <mode>          inline or none [default: inline]
+      --output <path>            Custom output directory
+```
 
 ## How it works
 

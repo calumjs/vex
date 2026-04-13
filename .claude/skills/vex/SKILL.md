@@ -1,6 +1,6 @@
 ---
 name: vex
-description: Semantic code search — find code by meaning, not just keywords. Use when the user asks to find code related to a concept, wants to understand how something works across the codebase, or needs to locate implementations they can't find with grep.
+description: Semantic search for code and engineering context — find implementations, docs, and synced GitHub issues/PRs by meaning, not just keywords. Use when searching for concepts, understanding how things work, or locating code that grep can't find.
 argument-hint: "<natural language query>"
 disable-model-invocation: false
 allowed-tools: Bash(vex *) Grep Read Glob
@@ -93,22 +93,46 @@ Present findings as:
 
 ## Searching synced GitHub issues and PRs
 
-If the project uses `vex sync github`, GitHub issues and PRs exist as local Markdown files. Search these when the user asks about:
-- decisions discussed in issues
-- bug history or prior reports
-- design debates in PRs
-- implementation rationale
+Vex can sync GitHub issues and PRs as local Markdown. If the project uses `vex sync github`, search these when the user asks about:
+- Why something was built a certain way
+- Bug history or prior reports
+- Design decisions and debates
+- Implementation rationale from PR discussions
+- Epic/feature planning
+
+### How to search synced issues
 
 ```bash
-# Find the synced path for a repo
-ls ~/.local/share/vex/sources/github/  # Linux/Mac
-ls $env:LOCALAPPDATA\vex\sources\github\  # Windows
+# Find the synced source path
+ls "$LOCALAPPDATA/vex/sources/github/"  # Windows
+ls ~/.local/share/vex/sources/github/   # Linux/Mac
 
-# Search synced issues
-vex "retry logic discussion" ~/.local/share/vex/sources/github/<owner>/<repo>/
+# Search all synced content (issues + PRs)
+vex "PII redaction strategy" "$LOCALAPPDATA/vex/sources/github/<owner>/<repo>/"
+
+# Search only issues
+vex "login timeout bug" "$LOCALAPPDATA/vex/sources/github/<owner>/<repo>/issues/"
+
+# Search only PRs
+vex "auth refactor" "$LOCALAPPDATA/vex/sources/github/<owner>/<repo>/prs/"
 ```
 
-When searching for both code and GitHub context, search the codebase first, then search synced GitHub artifacts, and combine the findings. If code search is weak, the explanation may live in an issue discussion.
+### When to sync first
+
+If the user asks about issue discussions but you haven't synced yet, run:
+```bash
+vex sync github              # auto-detects repo from git remote
+vex sync github owner/repo   # explicit repo
+```
+
+### Combining code + issue search
+
+For a complete picture, search both the codebase AND synced GitHub artifacts:
+1. Search code first: `vex "query" .`
+2. Search issues: `vex "query" "$LOCALAPPDATA/vex/sources/github/<owner>/<repo>/"`
+3. Combine findings — code shows the *what*, issues show the *why*
+
+If code search results are weak, the explanation often lives in an issue discussion rather than in comments.
 
 ## Filtering & scoping options
 
