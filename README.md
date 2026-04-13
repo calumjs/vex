@@ -262,7 +262,7 @@ No pre-indexing. No cache. Cold search, every time.
 
 ## Supported languages (tree-sitter chunking)
 
-Rust, Python, JavaScript, TypeScript, Go, C, C++, Java
+Rust, Python, JavaScript, TypeScript, Go, C, C++, Java, C#
 
 Other file types fall back to paragraph/sliding-window chunking — vex works on any text file.
 
@@ -288,7 +288,6 @@ OUTPUT:
 
 PERFORMANCE:
       --fast                 Binary quantization (faster, less precise)
-      --no-cache             Skip embedding cache
       --device <DEVICE>      npu, cpu, auto [default: auto]
       --threads <N>          Inference threads [default: num_cpus]
       --chunk-size <N>       Chunk size in tokens [default: 512]
