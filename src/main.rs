@@ -4,6 +4,7 @@ mod download;
 mod embed;
 mod output;
 mod search;
+mod sync;
 mod walk;
 
 use std::path::PathBuf;
@@ -11,15 +12,18 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use chunk::Chunker;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use ndarray::Array1;
 use rayon::prelude::*;
 
 #[derive(Parser, Debug)]
 #[command(name = "vex", version, about = "Semantic grep — find code and text by meaning")]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
     /// What to search for (natural language)
-    pub query: String,
+    pub query: Option<String>,
 
     /// Files or directories to search [default: .]
     #[arg(default_value = ".")]
@@ -94,6 +98,21 @@ pub struct Cli {
     pub model_dir: Option<PathBuf>,
 }
 
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Sync external sources into local searchable files
+    Sync {
+        #[command(subcommand)]
+        source: SyncSource,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SyncSource {
+    /// Sync GitHub issues and pull requests as local Markdown
+    Github(sync::github::GithubSyncArgs),
+}
+
 /// Resolve the model directory path.
 /// Search order: --model-dir flag > ./models/<name>/ > system data dir > auto-download
 fn resolve_model_dir(cli: &Cli) -> Result<PathBuf> {
@@ -129,6 +148,22 @@ fn resolve_model_dir(cli: &Cli) -> Result<PathBuf> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Dispatch subcommands
+    if let Some(command) = cli.command {
+        return match command {
+            Command::Sync { source } => match source {
+                SyncSource::Github(args) => sync::github::run(args),
+            },
+        };
+    }
+
+    // Search mode — query is required
+    let query = cli.query.as_deref().unwrap_or_else(|| {
+        eprintln!("Usage: vex <query> [paths...]\n       vex sync github [owner/repo]\n\nRun `vex --help` for full options.");
+        std::process::exit(1);
+    }).to_string();
+
     let total_start = Instant::now();
 
     // Set ORT dynamic library path — look next to our own executable first,
@@ -165,8 +200,7 @@ fn main() -> Result<()> {
     let chunk_start = Instant::now();
     let chunker = chunk::SmartChunker::new(cli.chunk_size, cli.overlap);
 
-    let mut query_terms: Vec<String> = cli
-        .query
+    let mut query_terms: Vec<String> = query
         .split(|c: char| !c.is_alphanumeric() && c != '_')
         .filter(|s| s.len() >= 2)
         .map(|s| s.to_lowercase())
@@ -271,7 +305,7 @@ fn main() -> Result<()> {
     let candidate_indices: Vec<usize> = if all_chunks.len() > bm25_target {
         let bm25 = search::bm25::Bm25::new();
         let texts: Vec<&str> = all_chunks.iter().map(|c| c.text.as_str()).collect();
-        let ranked = bm25.rank(&cli.query, &texts);
+        let ranked = bm25.rank(&query, &texts);
 
         // Start with BM25 top candidates
         let mut indices: Vec<usize> = if ranked.len() > bm25_target {
@@ -313,7 +347,7 @@ fn main() -> Result<()> {
     // Embed query + candidates in a single batch to avoid double session.run() overhead.
     let dim = embedder.dim();
     let mut all_texts: Vec<&str> = Vec::with_capacity(1 + candidate_indices.len());
-    all_texts.push(&cli.query);
+    all_texts.push(&query);
     for &i in &candidate_indices {
         all_texts.push(all_chunks[i].text.as_str());
     }

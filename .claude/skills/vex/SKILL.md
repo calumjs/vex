@@ -91,6 +91,25 @@ Present findings as:
 - **0.2 - 0.3**: Weak — check only if other results are sparse
 - **< 0.2**: Skip
 
+## Searching synced GitHub issues and PRs
+
+If the project uses `vex sync github`, GitHub issues and PRs exist as local Markdown files. Search these when the user asks about:
+- decisions discussed in issues
+- bug history or prior reports
+- design debates in PRs
+- implementation rationale
+
+```bash
+# Find the synced path for a repo
+ls ~/.local/share/vex/sources/github/  # Linux/Mac
+ls $env:LOCALAPPDATA\vex\sources\github\  # Windows
+
+# Search synced issues
+vex "retry logic discussion" ~/.local/share/vex/sources/github/<owner>/<repo>/
+```
+
+When searching for both code and GitHub context, search the codebase first, then search synced GitHub artifacts, and combine the findings. If code search is weak, the explanation may live in an issue discussion.
+
 ## Filtering & scoping options
 
 Use these to narrow results and reduce noise:

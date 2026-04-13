@@ -115,6 +115,28 @@ vex "logging" --fast
 vex "build config" --hidden --no-gitignore
 ```
 
+## Sync GitHub issues as searchable files
+
+Vex can sync GitHub issues and pull requests into local Markdown files, so you can search engineering discussions with the same workflow you use for code.
+
+```bash
+# Auto-detect repo from current directory
+vex sync github
+
+# Explicit repo
+vex sync github calumjs/vex
+
+# Sync issues and PRs, open only
+vex sync github --include issues,prs --state open
+
+# Search synced issues
+vex "keyboard shortcuts" ~/.local/share/vex/sources/github/anthropics/claude-code/
+```
+
+Auth: vex uses `gh auth token`, `GITHUB_TOKEN`, or `GH_TOKEN`. Credentials are only needed for sync — search runs locally over the materialized Markdown files.
+
+Subsequent syncs are incremental — only fetches items updated since the last sync.
+
 ## How it works
 
 ```
