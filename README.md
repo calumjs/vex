@@ -1,6 +1,6 @@
 # vex
 
-**Vector Examine** — semantic grep for code. Find things by meaning, not just text.
+**Vector Examine** — semantic grep for code, docs, and GitHub issues. Find things by meaning, not just keywords. No indexing, no server, sub-second results.
 
 ```
 vex "error handling with retries" src/
@@ -18,19 +18,23 @@ vex "error handling with retries" src/
           self.queue.push_back(task);
 ```
 
-## Why vex?
+## The problem
 
-Engineering context is increasingly scattered. Code lives in repos, but the *reasoning* behind it lives in GitHub issues, PR discussions, design docs, and architecture decision records. A single feature might span a dozen issues, three PRs, and a design doc — and six months later, nobody remembers which one explained *why* the retry logic works that way.
+More and more engineering context lives outside the code. The *why* behind a feature is spread across GitHub issues, PR discussions, design docs, and Slack threads that got pasted into a markdown file. A single decision might span a dozen issues, three PRs, and an ADR — and three months later, nobody remembers where the reasoning lives.
 
-Keyword search doesn't cut it. You search for "retry" and miss the issue titled "Resilience strategy for upstream timeouts". You search for "authentication" and miss the PR discussion about session management. The vocabulary gap between what you're looking for and how it was described means important context gets buried.
+`grep` and `ripgrep` can't help. You search for "retry" and miss the issue titled "Resilience strategy for upstream timeouts". You search for "authentication" and miss the PR discussion about session management. There's a vocabulary gap between what you're looking for and how it was originally described, and keyword search can't bridge it.
 
-**vex finds things by meaning, not just text.** It uses a neural network to understand what you're asking and matches it against your code, docs, and synced GitHub issues — all in under a second, with zero indexing or setup.
+This matters more as codebases grow and teams rely on AI tools like Claude Code to navigate them. If the context can't be found, it can't be used — and decisions get repeated, bugs get reintroduced, and tribal knowledge stays tribal.
 
-**Semantic search without indexing.** Most code search tools require you to build an index first, then query it. vex skips that entirely — point it at a directory, ask a question in plain English, get results immediately. No database, no server, no background process. It works by embedding your query and the code simultaneously at query time using a local neural network (all-MiniLM-L6-v2 via ONNX Runtime), with a BM25 pre-filter to keep latency under 1 second.
+## How vex solves it
 
-**Think `ripgrep` but for concepts.** `rg "retry"` finds the word "retry". `vex "error handling with retries"` finds `fetch_with_retry`, `handle_failure`, `CircuitBreakerPolicy`, and the design doc explaining the resilience strategy — even if none of them contain the word "retry".
+**Semantic search without indexing.** Point vex at a directory, ask a question in plain English, get ranked results in under a second. No database, no background process, no setup. It embeds your query and the code at query time using a local neural network, with a BM25 pre-filter so only the top candidates hit the model.
 
-**Search code and GitHub issues together.** With `vex sync github`, your issue discussions become searchable alongside your code. Search for "why did we change the auth flow" and find the PR discussion from three months ago, the architecture doc, and the implementation — all in one query.
+**Searches by meaning, not keywords.** `rg "retry"` finds the word "retry". `vex "error handling with retries"` finds `fetch_with_retry`, `handle_failure`, `CircuitBreakerPolicy`, and the design doc explaining the resilience strategy — even when none of them contain the word "retry".
+
+**Code and GitHub issues in one search.** Run `vex sync github` once to pull your issues and PRs down as local Markdown. After that, every `vex` search automatically includes them alongside your code. Search for "why did we change the auth flow" and find the PR discussion, the architecture doc, and the implementation — together, ranked by relevance.
+
+**Built for AI-assisted workflows.** vex ships with a Claude Code skill (`/vex`) that teaches the agent how to use semantic search effectively — synonym expansion, follow-up queries, and flow tracing. One `vex` call replaces 10-15 grep/glob/read calls, saving tokens and context window.
 
 ## Install
 
