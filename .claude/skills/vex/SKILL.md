@@ -91,13 +91,60 @@ Present findings as:
 - **0.2 - 0.3**: Weak — check only if other results are sparse
 - **< 0.2**: Skip
 
-## Quick reference
+## Filtering & scoping options
 
+Use these to narrow results and reduce noise:
+
+**`-g "*.cs"` — Filter by file glob.** Essential when results mix code with docs/configs.
+```bash
+vex "validation logic" -g "*.cs" ...          # only C# files
+vex "API routes" -g "*.ts" ...                # only TypeScript
+vex "build config" -g "*.{yml,yaml,json}" ... # only config files
 ```
--k N              Number of results (default 10)
--g "*.cs"         Filter by file glob
--C N              Lines of context around matches
---literal <term>  Boost files containing this keyword (repeatable)
---fast            Binary quantization (faster, slightly less precise)
---json            Machine-readable output
+
+**`-t 0.3` — Minimum similarity threshold.** Cuts low-scoring noise. Use 0.3 for focused results, 0.2 for broader exploration.
+```bash
+vex "authentication" -t 0.35 ...   # only strong matches
 ```
+
+**`-k N` — Number of results** (default 10). Use `-k 5` for focused searches, `-k 20` for broad exploration.
+
+**`[PATHS]` — Restrict to specific directories.** Defaults to `.` (current dir).
+```bash
+vex "error handling" src/Services/ ...         # only search Services
+vex "data access" src/Core/ src/CQRS/ ...     # search multiple dirs
+```
+
+**`--literal <term>` — Boost files containing this keyword.** Repeatable. Bridges vocabulary gaps between your query and the code. See the synonym table above.
+```bash
+vex "thread safety" --literal lock --literal mutex --literal concurrent ...
+```
+
+**`--hidden` — Include hidden files/dirs** (dotfiles). Useful for searching `.github/`, `.config/`, etc.
+
+**`--no-gitignore` — Include gitignored files.** Useful for searching `node_modules/`, build output, or vendor directories.
+
+## Output options
+
+**`-C N` — Lines of context** around each match (default 2). Use `-C 5` for more surrounding code, `-C 0` for compact output.
+
+**`--json` — JSON output.** Use when piping results to another tool or script:
+```bash
+vex "database queries" --json ... | jq '.[] | .file_path'
+```
+
+**`--no-color` — Plain text output.** Use when redirecting to a file or in CI.
+
+## Performance options
+
+**`--fast` — Binary quantization.** Uses sign-bit hashing for ~2x faster search at ~5-10% accuracy cost. Good for initial exploration on huge codebases.
+
+**`--no-cache` — Skip embedding cache.** Always re-embed. Use when files changed since last run or for benchmarking. Without this flag, unchanged files use cached embeddings (instant).
+
+**`--device cpu|npu|auto` — Inference device** (default auto, which uses CPU). NPU requires QNN runtime and pre-compiled context.
+
+**`--threads N` — Inference threads** (default: all CPU cores).
+
+**`--chunk-size N` — Chunk size in tokens** (default 512). Larger chunks give more context per result but fewer total chunks. Smaller chunks are more precise but may split relevant code.
+
+**`--overlap 0.2` — Chunk overlap fraction** (default 0.2). Higher overlap reduces the chance of splitting relevant code across chunk boundaries.
