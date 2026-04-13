@@ -20,11 +20,17 @@ vex "error handling with retries" src/
 
 ## Why vex?
 
-**Semantic search without indexing.** Most code search tools require you to build an index first, then query it. vex skips that entirely — point it at a directory, ask a question in plain English, get results in under a second. No setup, no database, no server, no background process.
+Engineering context is increasingly scattered. Code lives in repos, but the *reasoning* behind it lives in GitHub issues, PR discussions, design docs, and architecture decision records. A single feature might span a dozen issues, three PRs, and a design doc — and six months later, nobody remembers which one explained *why* the retry logic works that way.
 
-It works because vex embeds your query and the code simultaneously at query time, using a neural network (all-MiniLM-L6-v2) running locally via ONNX Runtime. A BM25 pre-filter narrows candidates before the neural model runs, keeping latency under 1 second even on large codebases.
+Keyword search doesn't cut it. You search for "retry" and miss the issue titled "Resilience strategy for upstream timeouts". You search for "authentication" and miss the PR discussion about session management. The vocabulary gap between what you're looking for and how it was described means important context gets buried.
+
+**vex finds things by meaning, not just text.** It uses a neural network to understand what you're asking and matches it against your code, docs, and synced GitHub issues — all in under a second, with zero indexing or setup.
+
+**Semantic search without indexing.** Most code search tools require you to build an index first, then query it. vex skips that entirely — point it at a directory, ask a question in plain English, get results immediately. No database, no server, no background process. It works by embedding your query and the code simultaneously at query time using a local neural network (all-MiniLM-L6-v2 via ONNX Runtime), with a BM25 pre-filter to keep latency under 1 second.
 
 **Think `ripgrep` but for concepts.** `rg "retry"` finds the word "retry". `vex "error handling with retries"` finds `fetch_with_retry`, `handle_failure`, `CircuitBreakerPolicy`, and the design doc explaining the resilience strategy — even if none of them contain the word "retry".
+
+**Search code and GitHub issues together.** With `vex sync github`, your issue discussions become searchable alongside your code. Search for "why did we change the auth flow" and find the PR discussion from three months ago, the architecture doc, and the implementation — all in one query.
 
 ## Install
 
