@@ -186,7 +186,10 @@ fn main() -> Result<()> {
     let mut files = walk::walk_paths(&cli)?;
 
     // Auto-include synced GitHub issues/PRs if available for this repo.
-    if !cli.paths.iter().any(|p| p.to_string_lossy().contains("sources/github")) {
+    // Skip when a file-type glob is set (e.g., -g "*.cs" shouldn't pull in .md issues).
+    if cli.glob.is_none()
+        && !cli.paths.iter().any(|p| p.to_string_lossy().contains("sources/github"))
+    {
         if let Ok((owner, repo)) = sync::github::detect_repo_silent() {
             if let Ok(source_dir) = sync::sources_dir() {
                 let github_dir = source_dir.join("github").join(&owner).join(&repo);

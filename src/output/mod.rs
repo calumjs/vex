@@ -39,9 +39,9 @@ pub fn print_results(
         stdout.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
         write!(stdout, "  ")?;
 
-        // File path in green
+        // File path in green — shorten synced GitHub paths for readability
         stdout.set_color(ColorSpec::new().set_fg(Some(Color::Green)).set_bold(true))?;
-        write!(stdout, "{}", chunk.file_path)?;
+        write!(stdout, "{}", shorten_github_path(&chunk.file_path))?;
 
         // Separator
         stdout.set_color(ColorSpec::new().set_fg(Some(Color::Cyan)))?;
@@ -82,6 +82,29 @@ pub fn print_results(
     }
 
     Ok(())
+}
+
+/// Shorten synced GitHub source paths for display.
+/// `C:\Users\...\vex\sources\github\owner\repo\issues\42-fix.md` → `github:owner/repo#42-fix.md`
+fn shorten_github_path(path: &str) -> String {
+    // Look for the "sources/github/" marker in the path
+    let normalized = path.replace('\\', "/");
+    if let Some(idx) = normalized.find("sources/github/") {
+        let remainder = &normalized[idx + "sources/github/".len()..];
+        // remainder is "owner/repo/issues/42-fix.md" or "owner/repo/prs/22-thing.md"
+        let parts: Vec<&str> = remainder.splitn(4, '/').collect();
+        if parts.len() >= 4 {
+            let owner = parts[0];
+            let repo = parts[1];
+            let kind = parts[2]; // "issues" or "prs"
+            let file = parts[3];
+            let prefix = if kind == "prs" { " PR#" } else { "#" };
+            // Strip number prefix from filename for cleaner display
+            let label = file.strip_suffix(".md").unwrap_or(file);
+            return format!("github:{owner}/{repo}{prefix}{label}");
+        }
+    }
+    path.to_string()
 }
 
 /// Print search results as JSON to stdout.
