@@ -249,6 +249,11 @@ fn main() -> Result<()> {
         }
     }
 
+    // #12: Auto synonym expansion — used for file NAME discovery, not content scoring.
+    // Adding "lock" to content scoring matches every C# file using lock().
+    // Adding "lock" to name discovery only matches files NAMED *Lock*.
+    let auto_syns = search::discover::auto_synonyms(&query);
+
     // Phase 1: Score files by keyword matches using mmap (no heap allocation
     // for non-matching files). Only read matching files into Strings.
     let max_files_to_chunk = 200;
@@ -306,6 +311,75 @@ fn main() -> Result<()> {
     scored_files.sort_unstable_by(|a, b| b.2.cmp(&a.2));
     scored_files.truncate(max_files_to_chunk);
 
+    // #6 + #11: Extract specific type names and imports from top matched files
+    // to discover related files that might not share query keywords.
+    let scored_paths: std::collections::HashSet<PathBuf> =
+        scored_files.iter().map(|(p, _, _)| p.clone()).collect();
+
+    let mut discovery_terms: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (_, content, _) in scored_files.iter().take(30) {
+        for name in search::discover::extract_type_names(content) {
+            // Only keep specific names (>= 10 chars) to avoid matching generic
+            // names like "Service" or "Handler" that appear everywhere
+            if name.len() >= 10 {
+                discovery_terms.insert(name.to_lowercase());
+            }
+        }
+        for name in search::discover::extract_imports(content) {
+            if name.len() >= 8 {
+                discovery_terms.insert(name.to_lowercase());
+            }
+        }
+    }
+
+    // #8: Git co-change — find files that frequently change alongside matched files
+    let matched_paths: Vec<&std::path::Path> = scored_files
+        .iter()
+        .take(20)
+        .map(|(p, _, _)| p.as_path())
+        .collect();
+    let cochange_files = search::discover::git_cochange_files(&matched_paths, 20);
+
+    // Discover additional files, capped at 50 to preserve latency
+    let max_extra = 50;
+    let extra_files: Vec<(PathBuf, String, usize)> = files
+        .par_iter()
+        .filter_map(|file| {
+            if scored_paths.contains(file) {
+                return None;
+            }
+            let fname = file.file_stem().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+            if fname.len() < 4 {
+                return None;
+            }
+
+            // Match against discovered type/import names OR auto-synonyms
+            let is_type_match = discovery_terms.contains(&fname)
+                || auto_syns.iter().any(|s| fname.contains(s.as_str()) && fname.len() > s.len());
+
+            // Git co-change match
+            let file_str = file.to_string_lossy().replace('\\', "/");
+            let is_cochange = cochange_files.iter().any(|c| {
+                file_str.ends_with(&c.to_string_lossy().replace('\\', "/"))
+            });
+
+            if !is_type_match && !is_cochange {
+                return None;
+            }
+
+            let bytes = std::fs::read(file).ok()?;
+            if bytes.is_empty() || bytes.len() > 2_000_000 {
+                return None;
+            }
+            let content = String::from_utf8(bytes).ok()?;
+            Some((file.clone(), content, 1))
+        })
+        .collect();
+
+    // Cap extras to preserve performance
+    let extra_count = extra_files.len().min(max_extra);
+    scored_files.extend(extra_files.into_iter().take(extra_count));
+
     let file_results: Vec<_> = scored_files
         .par_iter()
         .filter_map(|(path, content, _score)| {
@@ -334,9 +408,16 @@ fn main() -> Result<()> {
 
     // BM25 pre-filter: quickly narrow candidates with lexical matching,
     // then embed only the top candidates for semantic re-ranking.
-    // This brings embedding time from ~16s (all 4410 chunks) to ~400ms (top 100).
     let embed_start = Instant::now();
-    let bm25_target = 5 * cli.top_k.max(10); // embed 5x more than requested
+
+    // #4: Adaptive candidate budget — more candidates for vague queries
+    let bm25_target = if query_terms.len() <= 2 {
+        3 * cli.top_k.max(10) // specific query: fewer candidates
+    } else if query_terms.len() <= 4 {
+        5 * cli.top_k.max(10) // moderate query
+    } else {
+        8 * cli.top_k.max(10) // vague query: more candidates to find best matches
+    };
     let candidate_indices: Vec<usize> = if all_chunks.len() > bm25_target {
         let bm25 = search::bm25::Bm25::new();
         let texts: Vec<&str> = all_chunks.iter().map(|c| c.text.as_str()).collect();
@@ -404,20 +485,64 @@ fn main() -> Result<()> {
 
     // Search within the candidates
     let search_start = Instant::now();
-    let candidate_results = if cli.fast {
-        search::search_topk_binary(&query_arr, &corpus, cli.top_k, cli.threshold)
+    let neural_results = if cli.fast {
+        search::search_topk_binary(&query_arr, &corpus, cli.top_k * 3, cli.threshold)
     } else {
-        search::search_topk(&query_arr, &corpus, cli.top_k, cli.threshold)
+        search::search_topk(&query_arr, &corpus, cli.top_k * 3, cli.threshold)
     };
 
     // Map candidate indices back to original chunk indices
-    let results: Vec<search::SearchResult> = candidate_results
+    let neural_mapped: Vec<search::SearchResult> = neural_results
         .into_iter()
         .map(|r| search::SearchResult {
             chunk_index: candidate_indices[r.chunk_index],
             score: r.score,
         })
         .collect();
+
+    // #2: RRF score fusion — use BM25 ranks from earlier to reorder results.
+    // Build BM25 rank lookup from the candidate selection phase.
+    let bm25_ranked: Vec<(usize, f32)> = {
+        let bm25 = search::bm25::Bm25::new();
+        let candidate_texts: Vec<&str> = candidate_indices
+            .iter()
+            .map(|&i| all_chunks[i].text.as_str())
+            .collect();
+        let ranked = bm25.rank(&query, &candidate_texts);
+        // Map back to original chunk indices
+        ranked
+            .into_iter()
+            .map(|(rank_idx, score)| (candidate_indices[rank_idx], score))
+            .collect()
+    };
+
+    // Fuse: RRF determines order, but preserve neural scores for display
+    let mut results = if !bm25_ranked.is_empty() {
+        let fused = search::rrf::fuse_rrf(&neural_mapped, &bm25_ranked, cli.top_k * 2);
+        // Replace RRF scores with neural scores for human-readable output
+        fused
+            .into_iter()
+            .map(|r| {
+                let neural_score = neural_mapped
+                    .iter()
+                    .find(|n| n.chunk_index == r.chunk_index)
+                    .map(|n| n.score)
+                    .unwrap_or(0.0);
+                search::SearchResult {
+                    chunk_index: r.chunk_index,
+                    score: neural_score,
+                }
+            })
+            .collect::<Vec<_>>()
+    } else {
+        let mut r = neural_mapped;
+        r.truncate(cli.top_k * 2);
+        r
+    };
+
+    // #1: Deduplicate overlapping results from the same file
+    search::dedup::dedup_overlapping(&mut results, &all_chunks);
+    results.truncate(cli.top_k);
     let search_time = search_start.elapsed();
 
     // Output results

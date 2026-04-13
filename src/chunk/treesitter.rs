@@ -34,6 +34,7 @@ impl TreeSitterChunker {
                 Some(tree_sitter_cpp::LANGUAGE.into())
             }
             "java" => Some(tree_sitter_java::LANGUAGE.into()),
+            "cs" => Some(tree_sitter_c_sharp::LANGUAGE.into()),
             _ => None,
         }
     }
@@ -67,10 +68,14 @@ impl TreeSitterChunker {
                 | "struct_specifier"
                 | "class_specifier"
                 | "namespace_definition"
-                // Java
+                // Java / C#
                 | "interface_declaration"
                 | "enum_declaration"
                 | "constructor_declaration"
+                // C#
+                | "namespace_declaration"
+                | "record_declaration"
+                | "struct_declaration"
         )
     }
 
@@ -123,9 +128,18 @@ impl TreeSitterChunker {
                     continue;
                 }
 
-                // If the definition is too large, recurse into it
-                if token_count > self.max_chunk_tokens && depth < 2 {
-                    self.collect_definitions(child, content, file_path, chunks, depth + 1);
+                // If the definition is too large, try recursing into child definitions.
+                // If no children found, split by blank-line-separated blocks.
+                if token_count > self.max_chunk_tokens {
+                    if depth < 2 {
+                        let before = chunks.len();
+                        self.collect_definitions(child, content, file_path, chunks, depth + 1);
+                        if chunks.len() > before {
+                            continue; // found child definitions
+                        }
+                    }
+                    // No child definitions — split by blank-line blocks
+                    self.split_large_node(child, content, file_path, chunks);
                     continue;
                 }
 
@@ -149,6 +163,73 @@ impl TreeSitterChunker {
             } else if depth == 0 {
                 // Check children of non-definition top-level nodes (e.g., for nested classes)
                 self.collect_definitions(child, content, file_path, chunks, depth);
+            }
+        }
+    }
+
+    /// Split a large node (e.g. 500-line function) into sub-chunks by blank-line blocks.
+    fn split_large_node(
+        &self,
+        node: tree_sitter::Node,
+        content: &str,
+        file_path: &str,
+        chunks: &mut Vec<Chunk>,
+    ) {
+        let start = node.start_byte();
+        let end = node.end_byte();
+        let text = &content[start..end];
+        let base_line = node.start_position().row + 1;
+
+        // Build context prefix with parent scope
+        let parent_context = self.get_parent_context(node, content);
+        let context_prefix = if let Some(ctx) = parent_context {
+            format!("[{}::{}] ", file_path, ctx)
+        } else {
+            format!("[{}] ", file_path)
+        };
+
+        // Split on double newlines (blank lines)
+        let mut current_block = String::new();
+        let mut block_start_line = 0usize;
+        let mut line_offset = 0usize;
+
+        for line in text.lines() {
+            if line.trim().is_empty() && !current_block.trim().is_empty() {
+                let token_count = current_block.split_whitespace().count();
+                if token_count >= self.min_chunk_tokens {
+                    let prefixed = format!("{}{}", context_prefix, current_block);
+                    chunks.push(super::Chunk {
+                        file_path: file_path.to_string(),
+                        byte_offset: start,
+                        line_number: base_line + block_start_line,
+                        text: prefixed,
+                        token_count: token_count + context_prefix.split_whitespace().count(),
+                    });
+                }
+                current_block.clear();
+                block_start_line = line_offset + 1;
+            } else {
+                if current_block.is_empty() {
+                    block_start_line = line_offset;
+                }
+                current_block.push_str(line);
+                current_block.push('\n');
+            }
+            line_offset += 1;
+        }
+
+        // Last block
+        if !current_block.trim().is_empty() {
+            let token_count = current_block.split_whitespace().count();
+            if token_count >= self.min_chunk_tokens {
+                let prefixed = format!("{}{}", context_prefix, current_block);
+                chunks.push(super::Chunk {
+                    file_path: file_path.to_string(),
+                    byte_offset: start,
+                    line_number: base_line + block_start_line,
+                    text: prefixed,
+                    token_count: token_count + context_prefix.split_whitespace().count(),
+                });
             }
         }
     }

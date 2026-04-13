@@ -1,4 +1,7 @@
 pub mod bm25;
+pub mod dedup;
+pub mod discover;
+pub mod rrf;
 
 use ndarray::{Array1, Array2};
 
