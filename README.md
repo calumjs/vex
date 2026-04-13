@@ -1,6 +1,6 @@
 # vex
 
-Semantic grep for code. Find things by meaning, not just text.
+**Vector Examine** — semantic grep for code. Find things by meaning, not just text.
 
 ```
 vex "error handling with retries" src/
@@ -18,9 +18,17 @@ vex "error handling with retries" src/
           self.queue.push_back(task);
 ```
 
-vex embeds your query and every chunk of code using a neural network, then ranks by cosine similarity. It understands what you mean, not just what you typed.
+## Why vex?
+
+**Semantic search without indexing.** Most code search tools require you to build an index first, then query it. vex skips that entirely — point it at a directory, ask a question in plain English, get results in under a second. No setup, no database, no server, no background process.
+
+It works because vex embeds your query and the code simultaneously at query time, using a neural network (all-MiniLM-L6-v2) running locally via ONNX Runtime. A BM25 pre-filter narrows candidates before the neural model runs, keeping latency under 1 second even on large codebases.
+
+**Think `ripgrep` but for concepts.** `rg "retry"` finds the word "retry". `vex "error handling with retries"` finds `fetch_with_retry`, `handle_failure`, `CircuitBreakerPolicy`, and the design doc explaining the resilience strategy — even if none of them contain the word "retry".
 
 ## Install
+
+### 1. Install vex
 
 Requires [Rust](https://rustup.rs/).
 
@@ -28,7 +36,7 @@ Requires [Rust](https://rustup.rs/).
 cargo install --git https://github.com/calumjs/vex
 ```
 
-Then make sure `~/.cargo/bin` is on your PATH:
+Make sure `~/.cargo/bin` is on your PATH:
 
 **Windows (PowerShell, run once):**
 ```powershell
@@ -41,65 +49,11 @@ Then restart your terminal.
 export PATH="$HOME/.cargo/bin:$PATH"
 ```
 
-The model (~90 MB) downloads automatically on first run.
+The embedding model (~23 MB quantized) downloads automatically on first run.
 
-## Usage
+### 2. Install the Claude Code skill (optional)
 
-```bash
-# Search a directory
-vex "database connection pooling" src/
-
-# Top 3 results only
-vex "authentication middleware" src/ -k 3
-
-# Only search Rust files
-vex "error handling" . -g "*.rs"
-
-# JSON output for scripting
-vex "config parsing" src/ --json
-
-# Bridge vocabulary gaps with --literal
-vex "code that prevents race conditions" --literal lock --literal mutex
-
-# Fast mode (binary quantization — less precise, but faster on huge codebases)
-vex "logging" . --fast
-```
-
-## How it works
-
-```
-Query ──► Tokenize ──► Embed (ONNX) ──► Cosine Similarity ──► Ranked Results
-                            |
-Files ──► Chunk (tree-sitter) ──► Embed (ONNX) ──►──┘
-                            |
-                     Cache (blake3) ──► Skip re-embedding unchanged files
-```
-
-1. **Walk** files respecting `.gitignore`
-2. **Chunk** using tree-sitter for code (function/class boundaries) or paragraph splitting for prose
-3. **Embed** query and chunks with [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) via ONNX Runtime
-4. **Rank** by cosine similarity, return top-k
-5. **Cache** embeddings keyed by file content hash — second search is instant
-
-## Performance
-
-Benchmarked on Snapdragon X Elite (12-core Oryon, ARM64):
-
-| Codebase | Files | Chunks | Time |
-|----------|-------|--------|------|
-| Small (.NET app) | 585 | 3,227 | **468ms** |
-| Large (monorepo) | 19,366 | 35,579 | **729ms** |
-
-Uses BM25 pre-filtering + neural re-ranking: only the top candidates get embedded, keeping latency under 1 second regardless of codebase size.
-
-## Claude Code integration
-
-vex ships with a skill plugin for [Claude Code](https://claude.com/claude-code). Use `/vex` to search by meaning from any Claude session.
-
-**Project-level** (automatic for anyone cloning this repo):
-```
-.claude/skills/vex/SKILL.md  ← already included
-```
+vex ships with a `/vex` slash command for [Claude Code](https://claude.com/claude-code) that teaches Claude how to use vex effectively — including synonym expansion, follow-up queries, and flow tracing.
 
 **Global install** (available in all projects):
 ```bash
@@ -112,60 +66,125 @@ New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills\vex"
 Copy-Item .claude\skills\vex\SKILL.md "$env:USERPROFILE\.claude\skills\vex\"
 ```
 
+Or just clone this repo — the skill is automatically available in any Claude Code session within it.
+
 Then in Claude Code:
 ```
 /vex error handling in authentication
-/vex database connection pooling
+/vex how does the billing system work
 /vex "race conditions" --literal lock
 ```
 
-## NPU / GPU acceleration
+The skill instructs Claude to:
+- Expand queries with synonym `--literal` hints for vocabulary bridging
+- Run follow-up queries from different angles
+- Read top results and trace the code flow
+- Combine vex with grep for a complete picture
 
-On machines with DirectML support (Windows), vex auto-detects and uses hardware acceleration:
-
-- **Qualcomm Hexagon NPU** (Snapdragon X Elite/Plus)
-- **Any DirectML-compatible GPU**
-- Falls back to CPU if neither is available
+## Usage
 
 ```bash
-# Force a specific device
-vex "query" src/ --device npu
-vex "query" src/ --device gpu
-vex "query" src/ --device cpu
+# Search the current directory
+vex "database connection pooling"
+
+# Search a specific directory
+vex "authentication middleware" src/
+
+# Top 3 results only
+vex "config parsing" -k 3
+
+# Only search C# files
+vex "validation logic" -g "*.cs"
+
+# Bridge vocabulary gaps — find locking code when searching for "race conditions"
+vex "code that prevents race conditions" --literal lock --literal mutex
+
+# Set a minimum similarity threshold
+vex "error handling" -t 0.3
+
+# More context around matches
+vex "database migration" -C 5
+
+# JSON output for scripting
+vex "API endpoints" --json
+
+# Fast mode (binary quantization — less precise, ~2x faster on huge codebases)
+vex "logging" --fast
+
+# Search hidden files and gitignored directories
+vex "build config" --hidden --no-gitignore
 ```
+
+## How it works
+
+```
+                    ┌─────────────────────────────────────────┐
+  "retry logic" ──► │  1. Walk files (.gitignore-aware)        │
+                    │  2. Score files by keyword matches        │
+                    │  3. Chunk top files (tree-sitter / prose) │
+                    │  4. BM25 pre-filter → top candidates     │
+                    │  5. Neural embed (ONNX, INT8, 12 cores)  │
+                    │  6. Cosine similarity → ranked results    │
+                    └─────────────────────────────────────────┘
+```
+
+1. **Walk** files in parallel, respecting `.gitignore` and `.vexignore`
+2. **Score** files by query keyword matches — skip files with no keyword overlap
+3. **Chunk** the top 200 files using tree-sitter for code (function/class boundaries) or paragraph splitting for prose/markdown
+4. **BM25 pre-filter** narrows to the top ~50 candidates lexically
+5. **Embed** query + candidates with [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) (384-dim, INT8 quantized) via ONNX Runtime on CPU
+6. **Rank** by cosine similarity, return top-k
+
+The key insight: steps 2-4 eliminate >99% of chunks before the neural model runs. This is why vex doesn't need pre-indexing — it's fast enough to embed at query time.
+
+## Performance
+
+Benchmarked on Snapdragon X Elite (12-core Oryon, ARM64):
+
+| Codebase | Files | Chunks | Time |
+|----------|-------|--------|------|
+| Small (.NET app) | 585 | 3,227 | **468ms** |
+| Large (monorepo) | 19,366 | 35,579 | **729ms** |
+
+No pre-indexing. No cache. Cold search, every time.
 
 ## Supported languages (tree-sitter chunking)
 
 Rust, Python, JavaScript, TypeScript, Go, C, C++, Java
 
-Other file types fall back to paragraph/sliding-window chunking.
+Other file types fall back to paragraph/sliding-window chunking — vex works on any text file.
 
 ## Options
 
 ```
--k, --top <N>            Number of results [default: 10]
--t, --threshold <SCORE>  Minimum similarity score 0.0-1.0
--C, --context <LINES>    Lines of context around match [default: 2]
--g, --glob <PATTERN>     Only search files matching glob
-    --literal <TERM>     Boost files containing this keyword (repeatable)
-    --fast               Binary quantization (faster, less precise)
-    --no-cache           Skip embedding cache
-    --json               JSON output
-    --device <DEVICE>    npu, cpu, auto [default: auto]
-    --model-dir <PATH>   Custom model directory
-    --no-color           Disable colored output
-```
+ARGUMENTS:
+  <QUERY>                    Natural language search query
+  [PATHS]                    Directories to search [default: .]
 
-## Advanced: custom models
+FILTERING:
+  -k, --top <N>              Number of results [default: 10]
+  -t, --threshold <SCORE>    Minimum similarity score 0.0-1.0
+  -g, --glob <PATTERN>       Only search files matching glob
+      --literal <TERM>       Boost files containing this keyword (repeatable)
+      --hidden               Include hidden files/directories
+      --no-gitignore         Don't respect .gitignore
 
-The default model downloads automatically. To use a custom ONNX model:
+OUTPUT:
+  -C, --context <LINES>      Lines of context around match [default: 2]
+      --json                 JSON output
+      --no-color             Disable colored output
 
-```bash
-# Export with the included script (requires Python + transformers)
-python scripts/export_model.py --output-dir models/my-model
+PERFORMANCE:
+      --fast                 Binary quantization (faster, less precise)
+      --no-cache             Skip embedding cache
+      --device <DEVICE>      npu, cpu, auto [default: auto]
+      --threads <N>          Inference threads [default: num_cpus]
+      --chunk-size <N>       Chunk size in tokens [default: 512]
+      --overlap <FRAC>       Chunk overlap fraction [default: 0.2]
 
-# Use it
-vex "query" src/ --model-dir models/my-model
+MODEL:
+      --model <NAME>         Embedding model [default: minilm-l6-v2]
+      --model-dir <PATH>     Custom model directory
 ```
 
 ## License
