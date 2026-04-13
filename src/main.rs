@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use chunk::Chunker;
 use clap::Parser;
 use ndarray::Array1;
+use rayon::prelude::*;
 
 #[derive(Parser, Debug)]
 #[command(name = "vex", version, about = "Semantic grep — find code and text by meaning")]
@@ -126,12 +127,24 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let total_start = Instant::now();
 
+    // Set ORT dynamic library path — look next to our own executable first,
+    // then fall back to system search path.
+    if std::env::var_os("ORT_DYLIB_PATH").is_none() {
+        if let Ok(exe) = std::env::current_exe() {
+            let ort_dll = exe.with_file_name("onnxruntime.dll");
+            if ort_dll.exists() {
+                // SAFETY: called at program startup before any threads are spawned.
+                unsafe { std::env::set_var("ORT_DYLIB_PATH", &ort_dll); }
+            }
+        }
+    }
+
     // Resolve model directory
     let model_dir = resolve_model_dir(&cli)?;
 
     // Load embedder
     let device = embed::Device::from_str(&cli.device);
-    let mut embedder = embed::OnnxEmbedder::load(&model_dir, device)
+    let mut embedder = embed::OnnxEmbedder::load(&model_dir, device, cli.threads)
         .context("Failed to load embedding model")?;
 
     // Walk files
@@ -143,24 +156,92 @@ fn main() -> Result<()> {
     }
     let walk_time = walk_start.elapsed();
 
-    // Chunk all files (smart: tree-sitter for code, prose for md/txt, naive fallback)
+    // Two-phase pipeline: score files by keyword relevance, then only chunk the
+    // most promising ones. This avoids tree-sitter parsing thousands of files.
     let chunk_start = Instant::now();
     let chunker = chunk::SmartChunker::new(cli.chunk_size, cli.overlap);
 
-    // Read files and chunk them. Track file content for caching.
+    let query_terms: Vec<String> = cli
+        .query
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|s| s.len() >= 2)
+        .map(|s| s.to_lowercase())
+        .collect();
+
+    // Phase 1: Score files by keyword matches using mmap (no heap allocation
+    // for non-matching files). Only read matching files into Strings.
+    let max_files_to_chunk = 200;
+
+    let mut scored_files: Vec<_> = files
+        .par_iter()
+        .filter_map(|file| {
+            // Skip binary/large files by extension before reading
+            if let Some(ext) = file.extension().and_then(|e| e.to_str()) {
+                match ext.to_ascii_lowercase().as_str() {
+                    "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "bmp" | "webp" |
+                    "exe" | "dll" | "pdb" | "obj" | "lib" | "so" | "dylib" |
+                    "zip" | "gz" | "tar" | "7z" | "rar" | "nupkg" |
+                    "woff" | "woff2" | "ttf" | "eot" | "otf" |
+                    "mp3" | "mp4" | "avi" | "mov" | "wav" |
+                    "pdf" | "doc" | "docx" | "xls" | "xlsx" | "pptx" |
+                    "lock" | "map" | "min" | "snap" | "pyc" | "class" => return None,
+                    _ => {}
+                }
+            }
+
+            let bytes = std::fs::read(file).ok()?;
+            // Skip empty/huge files
+            if bytes.is_empty() || bytes.len() > 2_000_000 {
+                return None;
+            }
+
+            // Score by distinct query term matches — first-byte check to skip
+            // most bytes without calling to_ascii_lowercase on every one.
+            let score: usize = query_terms.iter().filter(|term| {
+                let tb = term.as_bytes();
+                let c0 = tb[0];
+                let c0_upper = c0.to_ascii_uppercase();
+                bytes.len() >= tb.len()
+                    && (0..=bytes.len() - tb.len()).any(|i| {
+                        let b = bytes[i];
+                        (b == c0 || b == c0_upper)
+                            && bytes[i..i + tb.len()]
+                                .iter()
+                                .zip(tb)
+                                .all(|(a, b)| a.to_ascii_lowercase() == *b)
+                    })
+            }).count();
+
+            if score == 0 {
+                return None;
+            }
+
+            let content = String::from_utf8(bytes).ok()?;
+            Some((file.clone(), content, score))
+        })
+        .collect();
+
+    // Phase 2: Take the top files by relevance score, then chunk only those.
+    scored_files.sort_unstable_by(|a, b| b.2.cmp(&a.2));
+    scored_files.truncate(max_files_to_chunk);
+
+    let file_results: Vec<_> = scored_files
+        .par_iter()
+        .filter_map(|(path, content, _score)| {
+            let file_chunks = chunker.chunk(path, content);
+            if file_chunks.is_empty() {
+                None
+            } else {
+                Some((path.clone(), content.clone(), file_chunks))
+            }
+        })
+        .collect();
+
     let mut all_chunks = Vec::new();
     let mut file_contents: Vec<(PathBuf, String)> = Vec::new();
-
-    for file in &files {
-        let content = match std::fs::read_to_string(file) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        let file_chunks = chunker.chunk(file, &content);
-        if !file_chunks.is_empty() {
-            all_chunks.extend(file_chunks);
-            file_contents.push((file.clone(), content));
-        }
+    for (path, content, chunks) in file_results {
+        all_chunks.extend(chunks);
+        file_contents.push((path, content));
     }
 
     if all_chunks.is_empty() {
@@ -169,90 +250,66 @@ fn main() -> Result<()> {
     }
     let chunk_time = chunk_start.elapsed();
 
-    // Open embedding cache (unless --no-cache)
-    let mut embedding_cache = if !cli.no_cache {
-        cache::EmbeddingCache::open(&cli.paths, embedder.dim()).ok()
+    // BM25 pre-filter: quickly narrow candidates with lexical matching,
+    // then embed only the top candidates for semantic re-ranking.
+    // This brings embedding time from ~16s (all 4410 chunks) to ~400ms (top 100).
+    let embed_start = Instant::now();
+    let bm25_candidates = 5 * cli.top_k.max(10); // embed 5x more than requested
+    let candidate_indices: Vec<usize> = if all_chunks.len() > bm25_candidates {
+        let bm25 = search::bm25::Bm25::new();
+        let texts: Vec<&str> = all_chunks.iter().map(|c| c.text.as_str()).collect();
+        let ranked = bm25.rank(&cli.query, &texts);
+        if ranked.len() > bm25_candidates {
+            ranked[..bm25_candidates].iter().map(|(idx, _)| *idx).collect()
+        } else if ranked.is_empty() {
+            // No BM25 matches — fall back to embedding everything
+            (0..all_chunks.len()).collect()
+        } else {
+            ranked.iter().map(|(idx, _)| *idx).collect()
+        }
     } else {
-        None
+        (0..all_chunks.len()).collect()
     };
 
-    // Embed query
-    let embed_start = Instant::now();
-    let query_vec = embedder.embed_one(&cli.query)?;
-    let query_arr = Array1::from_vec(query_vec);
-
-    // Embed chunks, using cache where possible
-    let batch_size = 64;
+    // Embed query + candidates in a single batch to avoid double session.run() overhead.
     let dim = embedder.dim();
-    let mut corpus_vecs: Vec<f32> = Vec::with_capacity(all_chunks.len() * dim);
-    let mut cache_hits = 0usize;
-    let mut cache_misses = 0usize;
-
-    // Group chunks by file content for cache lookup
-    let mut chunk_idx = 0;
-    for (_path, content) in &file_contents {
-        // Count chunks for this file
-        let file_chunk_count = all_chunks[chunk_idx..]
-            .iter()
-            .take_while(|c| c.file_path == all_chunks[chunk_idx].file_path)
-            .count();
-
-        // Try cache lookup
-        if let Some(ref cache) = embedding_cache {
-            if let Some(cached) = cache.get(content) {
-                if cached.len() == file_chunk_count {
-                    for emb in cached {
-                        corpus_vecs.extend(emb);
-                    }
-                    cache_hits += file_chunk_count;
-                    chunk_idx += file_chunk_count;
-                    continue;
-                }
-            }
-        }
-
-        // Cache miss: embed this file's chunks
-        let file_chunk_texts: Vec<&str> = all_chunks[chunk_idx..chunk_idx + file_chunk_count]
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
-
-        let mut file_embeddings = Vec::new();
-        for batch in file_chunk_texts.chunks(batch_size) {
-            let batch_emb = embedder.embed_batch(batch)?;
-            for row in batch_emb.rows() {
-                let vec: Vec<f32> = row.to_vec();
-                corpus_vecs.extend(&vec);
-                file_embeddings.push(vec);
-            }
-        }
-
-        // Store in cache
-        if let Some(ref mut cache) = embedding_cache {
-            cache.put(content, file_embeddings);
-        }
-
-        cache_misses += file_chunk_count;
-        chunk_idx += file_chunk_count;
+    let mut all_texts: Vec<&str> = Vec::with_capacity(1 + candidate_indices.len());
+    all_texts.push(&cli.query);
+    for &i in &candidate_indices {
+        all_texts.push(all_chunks[i].text.as_str());
     }
 
-    let corpus = ndarray::Array2::from_shape_vec((all_chunks.len(), dim), corpus_vecs)?;
+    let batch_size = 256;
+    let mut all_vecs: Vec<f32> = Vec::with_capacity(all_texts.len() * dim);
+    for batch in all_texts.chunks(batch_size) {
+        let batch_emb = embedder.embed_batch(batch)?;
+        for row in batch_emb.rows() {
+            all_vecs.extend(row.iter());
+        }
+    }
+
+    // First row is query, rest are candidates
+    let query_arr = Array1::from_vec(all_vecs[..dim].to_vec());
+    let candidate_vecs = all_vecs[dim..].to_vec();
+    let corpus = ndarray::Array2::from_shape_vec((candidate_indices.len(), dim), candidate_vecs)?;
     let embed_time = embed_start.elapsed();
 
-    // Save cache
-    if let Some(ref cache) = embedding_cache {
-        if let Err(e) = cache.save() {
-            eprintln!("vex: warning: failed to save cache: {e}");
-        }
-    }
-
-    // Search (use binary quantization if --fast)
+    // Search within the candidates
     let search_start = Instant::now();
-    let results = if cli.fast {
+    let candidate_results = if cli.fast {
         search::search_topk_binary(&query_arr, &corpus, cli.top_k, cli.threshold)
     } else {
         search::search_topk(&query_arr, &corpus, cli.top_k, cli.threshold)
     };
+
+    // Map candidate indices back to original chunk indices
+    let results: Vec<search::SearchResult> = candidate_results
+        .into_iter()
+        .map(|r| search::SearchResult {
+            chunk_index: candidate_indices[r.chunk_index],
+            score: r.score,
+        })
+        .collect();
     let search_time = search_start.elapsed();
 
     // Output results
@@ -269,20 +326,16 @@ fn main() -> Result<()> {
 
     // Print timing info to stderr
     let total_time = total_start.elapsed();
-    let cache_info = if embedding_cache.is_some() {
-        format!(" | cache {cache_hits}/{} hits", cache_hits + cache_misses)
-    } else {
-        String::new()
-    };
+    let embedded_count = candidate_indices.len();
     eprintln!(
-        "\nvex: {} files, {} chunks | walk {:.0}ms, chunk {:.0}ms, embed {:.0}ms, search {:.0}ms{} | total {:.0}ms",
+        "\nvex: {} files, {} chunks (embedded {}) | walk {:.0}ms, chunk {:.0}ms, embed {:.0}ms, search {:.0}ms | total {:.0}ms",
         files.len(),
         all_chunks.len(),
+        embedded_count,
         walk_time.as_secs_f64() * 1000.0,
         chunk_time.as_secs_f64() * 1000.0,
         embed_time.as_secs_f64() * 1000.0,
         search_time.as_secs_f64() * 1000.0,
-        cache_info,
         total_time.as_secs_f64() * 1000.0,
     );
 

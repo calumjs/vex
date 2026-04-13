@@ -15,11 +15,8 @@ pub fn walk_paths(cli: &Cli) -> Result<Vec<PathBuf>> {
         builder.git_ignore(!cli.no_gitignore);
         builder.git_global(!cli.no_gitignore);
         builder.git_exclude(!cli.no_gitignore);
-
-        // Add custom .vexignore support
         builder.add_custom_ignore_filename(".vexignore");
 
-        // Apply glob filter if specified
         if let Some(ref pattern) = cli.glob {
             let mut types_builder = ignore::types::TypesBuilder::new();
             types_builder.add("custom", pattern)?;
@@ -27,13 +24,25 @@ pub fn walk_paths(cli: &Cli) -> Result<Vec<PathBuf>> {
             builder.types(types_builder.build()?);
         }
 
-        let walker = builder.build();
-        for entry in walker {
-            let entry = entry?;
-            if entry.file_type().is_some_and(|ft| ft.is_file()) {
-                files.push(entry.into_path());
-            }
-        }
+        // Use parallel walker for large directory trees
+        let collected = std::sync::Mutex::new(Vec::new());
+        builder.threads(
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4),
+        );
+        builder.build_parallel().run(|| {
+            Box::new(|entry| {
+                if let Ok(entry) = entry {
+                    if entry.file_type().is_some_and(|ft| ft.is_file()) {
+                        collected.lock().unwrap().push(entry.into_path());
+                    }
+                }
+                ignore::WalkState::Continue
+            })
+        });
+
+        files.append(&mut collected.into_inner().unwrap());
     }
 
     files.sort();

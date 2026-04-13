@@ -1,3 +1,5 @@
+pub mod bm25;
+
 use ndarray::{Array1, Array2};
 
 /// Result of a semantic search.

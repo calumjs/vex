@@ -14,6 +14,13 @@ const MODEL_FILES: &[(&str, &str)] = &[
     ("model.onnx", "/onnx/model.onnx"),
 ];
 
+/// Architecture-specific quantized model for faster inference.
+#[cfg(target_arch = "aarch64")]
+const QUANTIZED_MODEL: (&str, &str) = ("model_int8.onnx", "/onnx/model_qint8_arm64.onnx");
+
+#[cfg(not(target_arch = "aarch64"))]
+const QUANTIZED_MODEL: (&str, &str) = ("model_int8.onnx", "/onnx/quint8_avx2.onnx");
+
 /// Returns the platform data directory for vex models.
 /// Windows: %LOCALAPPDATA%\vex\models\
 /// Linux/Mac: ~/.local/share/vex/models/
@@ -32,7 +39,10 @@ pub fn download_default_model() -> Result<PathBuf> {
 
     eprintln!("vex: downloading model (all-MiniLM-L6-v2) — this only happens once");
 
-    for (filename, hf_path) in MODEL_FILES {
+    let all_files = MODEL_FILES.iter()
+        .chain(std::iter::once(&QUANTIZED_MODEL));
+
+    for (filename, hf_path) in all_files {
         let dest_file = dest.join(filename);
         if dest_file.exists() {
             eprintln!("  {filename} (cached)");

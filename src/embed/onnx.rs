@@ -8,85 +8,116 @@ use tokenizers::Tokenizer;
 
 use super::Device;
 
-/// ONNX Runtime-based embedder with DirectML (NPU/GPU) support.
+const MAX_SEQ_LEN: usize = 128;
+const EMBED_DIM: usize = 384;
+
+/// ONNX Runtime-based embedder with QNN (Hexagon NPU) / CPU support.
 pub struct OnnxEmbedder {
     session: Session,
     tokenizer: Tokenizer,
-    dim: usize,
 }
 
 impl OnnxEmbedder {
     /// Load an ONNX model and tokenizer from the given directory.
-    ///
-    /// Tries DirectML execution provider first (for Hexagon NPU / Adreno GPU),
-    /// falls back to CPU if DirectML is unavailable.
-    pub fn load(model_dir: &Path, device: Device) -> Result<Self> {
+    pub fn load(model_dir: &Path, device: Device, threads: Option<usize>) -> Result<Self> {
         let tokenizer_path = model_dir.join("tokenizer.json");
-        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+        let mut tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {e}"))?;
 
-        // Pick model file: prefer INT8 quantized (NPU-optimized), fall back to FP32
-        let model_path = if model_dir.join("model_int8.onnx").exists() {
-            eprintln!("vex: using INT8 quantized model (NPU-optimized)");
-            model_dir.join("model_int8.onnx")
+        // Truncate at MAX_SEQ_LEN to avoid tokenizing tokens we discard
+        tokenizer
+            .with_truncation(Some(tokenizers::TruncationParams {
+                max_length: MAX_SEQ_LEN,
+                ..Default::default()
+            }))
+            .map_err(|e| anyhow::anyhow!("Failed to set truncation: {e}"))?;
+
+        // Pad to longest in batch on CPU (dynamic shape is fine).
+        // QNN/HTP needs fixed shapes — use Fixed(MAX_SEQ_LEN) there.
+        let padding_strategy = if device == Device::Npu {
+            tokenizers::PaddingStrategy::Fixed(MAX_SEQ_LEN)
         } else {
+            tokenizers::PaddingStrategy::BatchLongest
+        };
+        tokenizer.with_padding(Some(tokenizers::PaddingParams {
+            strategy: padding_strategy,
+            pad_id: 0,
+            pad_type_id: 0,
+            pad_token: "[PAD]".to_string(),
+            ..Default::default()
+        }));
+
+        // Pick model file: QNN HTP handles FP32→FP16 natively, so prefer FP32
+        // to avoid INT8 dequantize ops that cause slow HTP compilation.
+        // For CPU, INT8 is faster.
+        let model_path = if device == Device::Cpu {
+            if model_dir.join("model_int8.onnx").exists() {
+                eprintln!("vex: using INT8 quantized model");
+                model_dir.join("model_int8.onnx")
+            } else {
+                model_dir.join("model.onnx")
+            }
+        } else {
+            eprintln!("vex: using FP32 model (NPU will run in FP16)");
             model_dir.join("model.onnx")
         };
 
-        let session = Self::create_session(&model_path, device)?;
-
-        // MiniLM-L6-v2 has 384 dimensions
-        let dim = 384;
+        let session = Self::create_session(&model_path, device, threads)?;
 
         Ok(Self {
             session,
             tokenizer,
-            dim,
         })
     }
 
-    fn create_session(model_path: &Path, device: Device) -> Result<Session> {
-        match device {
-            Device::Auto | Device::Npu | Device::Gpu => {
-                // Try DirectML EP (exposes Hexagon NPU on Snapdragon X Elite)
-                let mut dml = ort::ep::DirectML::default();
-                if device == Device::Npu {
-                    dml = dml.with_device_filter(ort::ep::directml::DeviceFilter::Npu);
+    fn create_session(
+        model_path: &Path,
+        device: Device,
+        threads: Option<usize>,
+    ) -> Result<Session> {
+        // QNN EP (Hexagon NPU) — only when explicitly requested via --device npu.
+        // QNN has high compilation overhead for dynamic shapes.
+        if device == Device::Npu {
+            let qnn = ort::ep::QNN::default()
+                .with_backend_path("QnnHtp.dll")
+                .with_performance_mode(ort::ep::qnn::PerformanceMode::Burst)
+                .with_htp_fp16_precision(true);
+
+            let try_qnn = (|| -> std::result::Result<Session, String> {
+                let builder = Session::builder().map_err(|e| format!("builder: {e}"))?;
+                let mut builder = builder
+                    .with_execution_providers([qnn.build()])
+                    .map_err(|e| format!("ep: {e}"))?;
+                builder
+                    .commit_from_file(model_path)
+                    .map_err(|e| format!("commit: {e}"))
+            })();
+
+            match try_qnn {
+                Ok(session) => {
+                    eprintln!("vex: using QNN execution provider (Hexagon NPU)");
+                    return Ok(session);
                 }
-
-                let try_dml = (|| -> std::result::Result<Session, String> {
-                    let builder =
-                        Session::builder().map_err(|e| format!("builder: {e}"))?;
-                    let mut builder = builder
-                        .with_execution_providers([dml.build()])
-                        .map_err(|e| format!("ep: {e}"))?;
-                    builder
-                        .commit_from_file(model_path)
-                        .map_err(|e| format!("commit: {e}"))
-                })();
-
-                match try_dml {
-                    Ok(session) => {
-                        eprintln!("vex: using DirectML execution provider (NPU/GPU)");
-                        return Ok(session);
-                    }
-                    Err(e) => {
-                        if device == Device::Auto {
-                            eprintln!("vex: DirectML not available ({e}), falling back to CPU");
-                        } else {
-                            return Err(anyhow::anyhow!(
-                                "DirectML requested but not available: {e}"
-                            ));
-                        }
-                    }
+                Err(e) => {
+                    return Err(anyhow::anyhow!(
+                        "QNN NPU requested but not available: {e}"
+                    ));
                 }
             }
-            Device::Cpu => {}
         }
 
-        // CPU fallback
-        let mut builder =
-            Session::builder().map_err(|e| anyhow::anyhow!("Failed to create session builder: {e}"))?;
+        // CPU fallback — use all available cores unless overridden
+        let num_threads = threads.unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+        });
+        eprintln!("vex: using CPU execution provider ({num_threads} threads)");
+        let builder = Session::builder()
+            .map_err(|e| anyhow::anyhow!("Failed to create session builder: {e}"))?;
+        let mut builder = builder
+            .with_intra_threads(num_threads)
+            .map_err(|e| anyhow::anyhow!("Failed to set intra-op threads: {e}"))?;
         builder
             .commit_from_file(model_path)
             .map_err(|e| anyhow::anyhow!("Failed to load ONNX model: {e}"))
@@ -101,52 +132,44 @@ impl OnnxEmbedder {
     /// Embed a batch of texts, returning a (batch_size, dim) matrix of normalized vectors.
     pub fn embed_batch(&mut self, texts: &[&str]) -> Result<Array2<f32>> {
         if texts.is_empty() {
-            return Ok(Array2::zeros((0, self.dim)));
+            return Ok(Array2::zeros((0, EMBED_DIM)));
         }
 
-        // Tokenize all texts
+        // Tokenize with truncation + padding handled by the tokenizer
         let encodings = self
             .tokenizer
             .encode_batch(texts.to_vec(), true)
             .map_err(|e| anyhow::anyhow!("Tokenization failed: {e}"))?;
 
         let batch_size = encodings.len();
+        let seq_len = encodings[0].get_ids().len();
 
-        // Find max length for padding (capped at 128 for MiniLM)
-        let max_len = encodings
-            .iter()
-            .map(|e| e.get_ids().len())
-            .max()
-            .unwrap_or(0)
-            .min(128);
+        // Build input tensors directly from padded encodings
+        let total = batch_size * seq_len;
+        let mut input_ids = Vec::with_capacity(total);
+        let mut attention_mask = Vec::with_capacity(total);
+        let mut token_type_ids = Vec::with_capacity(total);
 
-        // Build padded input tensors
-        let mut input_ids_data = vec![0i64; batch_size * max_len];
-        let mut attention_mask_data = vec![0i64; batch_size * max_len];
-        let mut token_type_ids_data = vec![0i64; batch_size * max_len];
-
-        for (i, encoding) in encodings.iter().enumerate() {
-            let ids = encoding.get_ids();
-            let mask = encoding.get_attention_mask();
-            let type_ids = encoding.get_type_ids();
-            let len = ids.len().min(max_len);
-
-            for j in 0..len {
-                input_ids_data[i * max_len + j] = ids[j] as i64;
-                attention_mask_data[i * max_len + j] = mask[j] as i64;
-                token_type_ids_data[i * max_len + j] = type_ids[j] as i64;
+        for enc in &encodings {
+            for &id in enc.get_ids() {
+                input_ids.push(id as i64);
+            }
+            for &m in enc.get_attention_mask() {
+                attention_mask.push(m as i64);
+            }
+            for &t in enc.get_type_ids() {
+                token_type_ids.push(t as i64);
             }
         }
 
-        // Create ort Tensor values (shape tuple + boxed slice)
-        let shape = [batch_size, max_len];
-        let input_ids_tensor = Tensor::from_array((shape, input_ids_data.into_boxed_slice()))
+        let shape = [batch_size, seq_len];
+        let input_ids_tensor = Tensor::from_array((shape, input_ids.into_boxed_slice()))
             .map_err(|e| anyhow::anyhow!("Failed to create input_ids tensor: {e}"))?;
         let attention_mask_tensor =
-            Tensor::from_array((shape, attention_mask_data.clone().into_boxed_slice()))
+            Tensor::from_array((shape, attention_mask.clone().into_boxed_slice()))
                 .map_err(|e| anyhow::anyhow!("Failed to create attention_mask tensor: {e}"))?;
         let token_type_ids_tensor =
-            Tensor::from_array((shape, token_type_ids_data.into_boxed_slice()))
+            Tensor::from_array((shape, token_type_ids.into_boxed_slice()))
                 .map_err(|e| anyhow::anyhow!("Failed to create token_type_ids tensor: {e}"))?;
 
         // Run inference
@@ -168,17 +191,17 @@ impl OnnxEmbedder {
             .context("Expected 3D output tensor")?;
 
         // Mean pooling with attention mask, then L2 normalize
-        let mut embeddings = Array2::zeros((batch_size, self.dim));
+        let mut embeddings = Array2::zeros((batch_size, EMBED_DIM));
 
         for i in 0..batch_size {
-            let mut sum = vec![0f32; self.dim];
+            let mut sum = vec![0f32; EMBED_DIM];
             let mut mask_sum = 0f32;
 
-            for j in 0..max_len {
-                let m = attention_mask_data[i * max_len + j] as f32;
+            for j in 0..seq_len {
+                let m = attention_mask[i * seq_len + j] as f32;
                 if m > 0.0 {
                     mask_sum += m;
-                    for d in 0..self.dim {
+                    for d in 0..EMBED_DIM {
                         sum[d] += hidden[[i, j, d]] * m;
                     }
                 }
@@ -186,13 +209,13 @@ impl OnnxEmbedder {
 
             if mask_sum > 0.0 {
                 let mut norm_sq = 0f32;
-                for d in 0..self.dim {
+                for d in 0..EMBED_DIM {
                     sum[d] /= mask_sum;
                     norm_sq += sum[d] * sum[d];
                 }
                 let norm = norm_sq.sqrt();
                 if norm > 0.0 {
-                    for d in 0..self.dim {
+                    for d in 0..EMBED_DIM {
                         embeddings[[i, d]] = sum[d] / norm;
                     }
                 }
@@ -204,6 +227,6 @@ impl OnnxEmbedder {
 
     /// Embedding dimensionality.
     pub fn dim(&self) -> usize {
-        self.dim
+        EMBED_DIM
     }
 }
