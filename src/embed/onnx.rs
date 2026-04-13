@@ -76,26 +76,52 @@ impl OnnxEmbedder {
         threads: Option<usize>,
     ) -> Result<Session> {
         // QNN EP (Hexagon NPU) — only when explicitly requested via --device npu.
-        // QNN has high compilation overhead for dynamic shapes.
+        // Uses context caching: first run compiles the model for HTP (~30s),
+        // subsequent runs load the cached context binary (instant).
         if device == Device::Npu {
+            // Context cache path next to the model file
+            let ctx_path = model_path.with_extension("qnn_ctx.onnx");
+            let has_cached_ctx = ctx_path.exists();
+
             let qnn = ort::ep::QNN::default()
                 .with_backend_path("QnnHtp.dll")
                 .with_performance_mode(ort::ep::qnn::PerformanceMode::Burst)
                 .with_htp_fp16_precision(true);
 
             let try_qnn = (|| -> std::result::Result<Session, String> {
-                let builder = Session::builder().map_err(|e| format!("builder: {e}"))?;
+                let mut builder = Session::builder().map_err(|e| format!("builder: {e}"))?;
+
+                // Enable context caching — saves compiled HTP binary on first run
+                if !has_cached_ctx {
+                    builder = builder
+                        .with_config_entry("ep.context_enable", "1")
+                        .map_err(|e| format!("ctx_enable: {e}"))?;
+                    builder = builder
+                        .with_config_entry("ep.context_file_path", ctx_path.to_string_lossy())
+                        .map_err(|e| format!("ctx_path: {e}"))?;
+                    builder = builder
+                        .with_config_entry("ep.context_embed_mode", "0")
+                        .map_err(|e| format!("ctx_mode: {e}"))?;
+                }
+
                 let mut builder = builder
                     .with_execution_providers([qnn.build()])
                     .map_err(|e| format!("ep: {e}"))?;
+
+                // Load from cached context if available, otherwise from ONNX model
+                let load_path = if has_cached_ctx { &ctx_path } else { model_path };
                 builder
-                    .commit_from_file(model_path)
+                    .commit_from_file(load_path)
                     .map_err(|e| format!("commit: {e}"))
             })();
 
             match try_qnn {
                 Ok(session) => {
-                    eprintln!("vex: using QNN execution provider (Hexagon NPU)");
+                    if has_cached_ctx {
+                        eprintln!("vex: using QNN execution provider (Hexagon NPU, cached context)");
+                    } else {
+                        eprintln!("vex: using QNN execution provider (Hexagon NPU, first-run compilation)");
+                    }
                     return Ok(session);
                 }
                 Err(e) => {
