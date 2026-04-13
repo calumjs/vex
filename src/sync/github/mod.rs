@@ -1,6 +1,6 @@
 mod api;
 mod auth;
-mod detect;
+pub(crate) mod detect;
 mod render;
 mod state;
 
@@ -11,6 +11,13 @@ use clap::Args;
 
 use api::{FetchParams, GithubClient};
 use state::{Manifest, ManifestEntry, SyncState};
+
+/// Try to detect the GitHub repo from git remotes. Returns Ok((owner, repo))
+/// if successful, Err if not in a git repo or no GitHub remote found.
+/// Does not print any error messages.
+pub fn detect_repo_silent() -> anyhow::Result<(String, String)> {
+    detect::detect_repo()
+}
 
 #[derive(Args, Debug)]
 pub struct GithubSyncArgs {

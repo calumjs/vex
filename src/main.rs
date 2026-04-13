@@ -188,7 +188,42 @@ fn main() -> Result<()> {
 
     // Walk files
     let walk_start = Instant::now();
-    let files = walk::walk_paths(&cli)?;
+    let mut files = walk::walk_paths(&cli)?;
+
+    // Auto-include synced GitHub issues/PRs if available for this repo.
+    if !cli.paths.iter().any(|p| p.to_string_lossy().contains("sources/github")) {
+        if let Ok((owner, repo)) = sync::github::detect_repo_silent() {
+            if let Ok(source_dir) = sync::sources_dir() {
+                let github_dir = source_dir.join("github").join(&owner).join(&repo);
+                if github_dir.exists() {
+                    // Walk the synced GitHub directory for .md files
+                    let mut count = 0;
+                    if let Ok(entries) = std::fs::read_dir(&github_dir) {
+                        for subdir in entries.flatten() {
+                            if subdir.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                                let name = subdir.file_name();
+                                if name == "issues" || name == "prs" {
+                                    if let Ok(md_files) = std::fs::read_dir(subdir.path()) {
+                                        for f in md_files.flatten() {
+                                            let path = f.path();
+                                            if path.extension().is_some_and(|e| e == "md") {
+                                                files.push(path);
+                                                count += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if count > 0 {
+                        eprintln!("vex: including {count} synced GitHub files from {owner}/{repo}");
+                    }
+                }
+            }
+        }
+    }
+
     if files.is_empty() {
         eprintln!("vex: no files found");
         return Ok(());
