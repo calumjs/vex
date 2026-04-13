@@ -61,6 +61,10 @@ pub struct Cli {
     #[arg(long, default_value = "auto")]
     pub device: String,
 
+    /// Pre-filter files by literal keyword (boosts files containing this term)
+    #[arg(long)]
+    pub literal: Vec<String>,
+
     /// Binary quantization (faster, less precise)
     #[arg(long)]
     pub fast: bool,
@@ -161,12 +165,20 @@ fn main() -> Result<()> {
     let chunk_start = Instant::now();
     let chunker = chunk::SmartChunker::new(cli.chunk_size, cli.overlap);
 
-    let query_terms: Vec<String> = cli
+    let mut query_terms: Vec<String> = cli
         .query
         .split(|c: char| !c.is_alphanumeric() && c != '_')
         .filter(|s| s.len() >= 2)
         .map(|s| s.to_lowercase())
         .collect();
+
+    // --literal hints get added as extra search terms for file scoring
+    for lit in &cli.literal {
+        let term = lit.to_lowercase();
+        if !query_terms.contains(&term) {
+            query_terms.push(term);
+        }
+    }
 
     // Phase 1: Score files by keyword matches using mmap (no heap allocation
     // for non-matching files). Only read matching files into Strings.
@@ -248,25 +260,52 @@ fn main() -> Result<()> {
         eprintln!("vex: no chunks produced from {} files", files.len());
         return Ok(());
     }
+
     let chunk_time = chunk_start.elapsed();
 
     // BM25 pre-filter: quickly narrow candidates with lexical matching,
     // then embed only the top candidates for semantic re-ranking.
     // This brings embedding time from ~16s (all 4410 chunks) to ~400ms (top 100).
     let embed_start = Instant::now();
-    let bm25_candidates = 5 * cli.top_k.max(10); // embed 5x more than requested
-    let candidate_indices: Vec<usize> = if all_chunks.len() > bm25_candidates {
+    let bm25_target = 5 * cli.top_k.max(10); // embed 5x more than requested
+    let candidate_indices: Vec<usize> = if all_chunks.len() > bm25_target {
         let bm25 = search::bm25::Bm25::new();
         let texts: Vec<&str> = all_chunks.iter().map(|c| c.text.as_str()).collect();
         let ranked = bm25.rank(&cli.query, &texts);
-        if ranked.len() > bm25_candidates {
-            ranked[..bm25_candidates].iter().map(|(idx, _)| *idx).collect()
+
+        // Start with BM25 top candidates
+        let mut indices: Vec<usize> = if ranked.len() > bm25_target {
+            ranked[..bm25_target].iter().map(|(idx, _)| *idx).collect()
         } else if ranked.is_empty() {
-            // No BM25 matches — fall back to embedding everything
             (0..all_chunks.len()).collect()
         } else {
             ranked.iter().map(|(idx, _)| *idx).collect()
+        };
+
+        // Hybrid boost: also include chunks where query terms appear as
+        // identifiers (in file path or code). This catches exact matches
+        // that BM25 might rank low due to high document frequency.
+        let mut seen: std::collections::HashSet<usize> = indices.iter().copied().collect();
+        let boost_limit = bm25_target / 2; // add up to 50% more from grep matches
+        let mut boosted = 0;
+        for (i, chunk) in all_chunks.iter().enumerate() {
+            if boosted >= boost_limit {
+                break;
+            }
+            if seen.contains(&i) {
+                continue;
+            }
+            // Check if the file path contains any query term (catches class names)
+            let path_lower = chunk.file_path.to_lowercase();
+            let has_path_match = query_terms.iter().any(|t| path_lower.contains(t.as_str()));
+            if has_path_match {
+                indices.push(i);
+                seen.insert(i);
+                boosted += 1;
+            }
         }
+
+        indices
     } else {
         (0..all_chunks.len()).collect()
     };
