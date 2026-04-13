@@ -1,0 +1,35 @@
+[package]
+name = "vex"
+version = "0.1.0"
+edition = "2024"
+description = "Semantic grep — find code and text by meaning"
+license = "MIT"
+
+[[bin]]
+name = "vex"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ignore = "0.4"
+anyhow = "1"
+termcolor = "1.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ort = { version = "2.0.0-rc.12", features = ["directml"] }
+ndarray = "0.17"
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+dirs = "6"
+blake3 = "1"
+memmap2 = "0.9"
+rayon = "1.10"
+ureq = { version = "3", default-features = false, features = ["native-tls", "gzip"] }
+tree-sitter = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-c = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-java = "0.23"
