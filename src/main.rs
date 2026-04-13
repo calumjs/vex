@@ -153,11 +153,16 @@ fn main() -> Result<()> {
         };
     }
 
-    // Search mode — query is required
+    // Search mode — query is required and must be meaningful
     let query = cli.query.as_deref().unwrap_or_else(|| {
         eprintln!("Usage: vex <query> [paths...]\n       vex sync github [owner/repo]\n\nRun `vex --help` for full options.");
         std::process::exit(1);
     }).to_string();
+
+    if query.split_whitespace().all(|w| w.len() < 2) {
+        eprintln!("vex: query too short. Try a natural language question like:\n  vex \"error handling with retries\" src/");
+        return Ok(());
+    }
 
     let total_start = Instant::now();
 
@@ -170,6 +175,13 @@ fn main() -> Result<()> {
                 // SAFETY: called at program startup before any threads are spawned.
                 unsafe { std::env::set_var("ORT_DYLIB_PATH", &ort_dll); }
             }
+        }
+    }
+
+    // Validate search paths exist
+    for path in &cli.paths {
+        if !path.exists() {
+            anyhow::bail!("Path does not exist: {}", path.display());
         }
     }
 
@@ -408,13 +420,14 @@ fn main() -> Result<()> {
     // then embed only the top candidates for semantic re-ranking.
     let embed_start = Instant::now();
 
-    // #4: Adaptive candidate budget — more candidates for vague queries
+    // #4: Adaptive candidate budget — more candidates for vague queries.
+    // Capped at 150 to prevent -k 1000 from embedding thousands.
     let bm25_target = if query_terms.len() <= 2 {
-        3 * cli.top_k.max(10) // specific query: fewer candidates
+        (3 * cli.top_k.max(10)).min(150)
     } else if query_terms.len() <= 4 {
-        5 * cli.top_k.max(10) // moderate query
+        (5 * cli.top_k.max(10)).min(150)
     } else {
-        8 * cli.top_k.max(10) // vague query: more candidates to find best matches
+        (8 * cli.top_k.max(10)).min(150)
     };
     let candidate_indices: Vec<usize> = if all_chunks.len() > bm25_target {
         let bm25 = search::bm25::Bm25::new();
@@ -520,16 +533,17 @@ fn main() -> Result<()> {
         // Replace RRF scores with neural scores for human-readable output
         fused
             .into_iter()
-            .map(|r| {
+            .filter_map(|r| {
+                // Only keep results that have a neural score — chunks promoted
+                // by BM25 alone (never embedded) would show as 0.0000
                 let neural_score = neural_mapped
                     .iter()
                     .find(|n| n.chunk_index == r.chunk_index)
-                    .map(|n| n.score)
-                    .unwrap_or(0.0);
-                search::SearchResult {
+                    .map(|n| n.score)?;
+                Some(search::SearchResult {
                     chunk_index: r.chunk_index,
                     score: neural_score,
-                }
+                })
             })
             .collect::<Vec<_>>()
     } else {
