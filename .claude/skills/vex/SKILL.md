@@ -32,7 +32,7 @@ Before running vex, think about what vocabulary the code might use for this conc
 ## Step 2: Run vex
 
 ```bash
-vex "$ARGUMENTS" --no-cache --device cpu -k 10 --literal <term1> --literal <term2> --literal <term3>
+vex "$ARGUMENTS" --device cpu -k 10 --literal <term1> --literal <term2> --literal <term3>
 ```
 
 ## Step 3: Read top results
@@ -46,7 +46,7 @@ This is critical — don't stop at one vex call. The initial results reveal the 
 **a) Rephrase from a different angle.** If the first query was abstract ("how are users notified"), try a concrete angle ("email sending service") or an implementation angle ("SignalR hub push message"):
 
 ```bash
-vex "email sending service" --no-cache --device cpu -k 5 --literal smtp --literal sendgrid
+vex "email sending service" --device cpu -k 5 --literal smtp --literal sendgrid
 ```
 
 **b) Search for specific identifiers found in the initial results.** If vex found `WebhookDelivery.cs`, grep for its callers:
@@ -59,13 +59,13 @@ Grep: WebhookDelivery
 **c) Search for the interface/abstraction if you found an implementation** (or vice versa):
 
 ```bash
-vex "webhook delivery abstraction" --no-cache --device cpu -k 5 --literal IWebhook --literal delivery
+vex "webhook delivery abstraction" --device cpu -k 5 --literal IWebhook --literal delivery
 ```
 
 **d) Narrow by file type** if results are noisy:
 
 ```bash
-vex "$ARGUMENTS" --no-cache --device cpu -k 10 -g "*.cs"
+vex "$ARGUMENTS" --device cpu -k 10 -g "*.cs"
 ```
 
 ## Step 5: Trace the flow
@@ -181,8 +181,6 @@ vex "database queries" --json ... | jq '.[] | .file_path'
 ## Performance options
 
 **`--fast` — Binary quantization.** Uses sign-bit hashing for ~2x faster search at ~5-10% accuracy cost. Good for initial exploration on huge codebases.
-
-**`--no-cache` — Skip embedding cache.** Always re-embed. Use when files changed since last run or for benchmarking. Without this flag, unchanged files use cached embeddings (instant).
 
 **`--device cpu|npu|auto` — Inference device** (default auto, which uses CPU). NPU requires QNN runtime and pre-compiled context.
 
