@@ -1,0 +1,44 @@
+---
+title: "Inaugural post: vex so far"
+date: "2026-04-19"
+summary: "The project so far, from first commit to today — what shipped, what was cut, and where it's going."
+tags: ["inaugural"]
+generatedBy: "docent"
+generatedAt: "2026-04-19T00:41:02Z"
+mode: "init"
+commitRange: "e70ec68..4fe51b2"
+---
+
+`vex` is a single Rust binary that does semantic search over code and engineering context without a pre-built index. This is the first post in the journal — a catch-up for anyone arriving after the initial burst of work. The repo is young: first commit (`e70ec68`) landed on 2026-04-13, and most of what exists today was built in a few focused days after that.
+
+## First release: semantic grep without indexing
+
+The initial commit (`e70ec68`, "NPU-accelerated semantic grep") set the architectural line the project still follows: walk files, keyword-score them, chunk the survivors with tree-sitter, BM25 pre-filter the chunks, then embed query and candidates with [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) at query time. No database, no background process. The README (`80d39ae`) landed the same day, followed by PATH setup notes (`485f6b9`) once the install story had been tried on a cold machine.
+
+## Embedding pipeline: 53s → 450ms
+
+The single biggest performance change so far is `734298d`, "Optimize embedding pipeline: 53s → 450ms (119x speedup)." Most of the win came from parallelising the CPU path and tightening the candidate funnel — BM25 now discards >99% of chunks before anything hits the model. That gain is what makes query-time embedding viable; without it, `vex` would need a stored index like every other semantic search tool.
+
+## Hybrid search: `--literal` and path boosts
+
+`84ba552` added `--literal <TERM>`, a repeatable flag that boosts files containing a given keyword before the neural pass. It closes the other side of the vocabulary gap: if you *know* the codebase uses `mutex` or `lock` for what you are describing as "race conditions," you can bridge that directly (`vex "code that prevents race conditions" --literal lock`). Same commit added path-based candidate boosting — matches in `src/` outrank matches in `tests/` or `target/` by default.
+
+## NPU support and the caching detour
+
+`8cddf81` wired up QNN context caching for `--device npu`, targeting the Snapdragon X Elite's Hexagon NPU. A later attempt at chunk-level embedding caching (`6c4e87f`, PR [#3](https://github.com/calumjs/vex/pull/3)) was reverted in `ac8f695` — the cache invalidation story was not worth the complexity given how fast the cold path already was. Worth recording: the cache was a real feature that shipped and was taken back out, not a planned stub.
+
+## GitHub sync: issues and PRs as searchable files
+
+`fc56053` introduced `vex sync github`, which materializes GitHub issues and pull requests into local Markdown with YAML frontmatter under `~/.local/share/vex/sources/github/owner/repo/`. Follow-up work in `42c85cb` made synced issues show up automatically alongside code in every `vex` search, so the same query returns the implementation and the discussion that motivated it. Incremental sync is watermark-based; `--force` re-fetches everything.
+
+## Language coverage and Claude Code integration
+
+`07adcba` bundled 11 search-quality improvements with C# tree-sitter support; `aa021ef` formally added C# to the supported-languages list. Alongside that, `32ce92a` added the `/vex` [Claude Code](https://claude.com/claude-code) skill plugin, and `ad93053` / `79f0f0d` taught it follow-up query patterns, flow tracing, and synonym expansion hints. The goal is that one `vex` call replaces 10–15 grep/glob/read calls from an agent.
+
+## Bug fixes from dogfooding
+
+`2b42ed5` and `7cec00a` ("Fix 3 issues found from dogfooding" / "Fix 4 edge cases from dogfooding") captured the tail end of the shakedown — the kind of issues that only surface when you run the tool against your own repos instead of test fixtures. Expect more of these as the project sees more real-world input.
+
+## What's next
+
+Nothing tagged as a release yet, so the [changelog](../changelog/) is intentionally thin. The [status page](../status/) currently shows no open issues — if you hit one, [open it](https://github.com/calumjs/vex/issues/new). Future journal posts will run on the weekly cadence configured in `docent.config.json`.

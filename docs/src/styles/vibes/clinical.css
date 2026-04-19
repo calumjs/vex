@@ -1,0 +1,97 @@
+/* clinical — all sans, generous whitespace, muted grayscale + single accent. */
+
+html[data-vibe='clinical'] {
+  --color-bg: #ffffff;
+  --color-surface: #f1f5f9;
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --color-border: #e2e8f0;
+  --measure: 62ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-vibe='clinical'] {
+    --color-bg: #0f172a;
+    --color-surface: #1e293b;
+    --color-text: #f1f5f9;
+    --color-text-muted: #94a3b8;
+    --color-border: #334155;
+  }
+}
+
+html[data-vibe='clinical'] body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+html[data-vibe='clinical'] main {
+  padding-block: var(--space-6);
+}
+
+html[data-vibe='clinical'] h1,
+html[data-vibe='clinical'] h2,
+html[data-vibe='clinical'] h3 {
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+html[data-vibe='clinical'] h1 {
+  font-size: 1.8rem;
+  margin-bottom: var(--space-5);
+  font-weight: 500;
+}
+
+html[data-vibe='clinical'] h2 {
+  font-size: 1.15rem;
+  margin-top: var(--space-6);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+html[data-vibe='clinical'] header.site {
+  border-bottom: 0;
+  padding-block: var(--space-5);
+}
+
+html[data-vibe='clinical'] header.site .brand {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+html[data-vibe='clinical'] header.site nav a {
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+
+html[data-vibe='clinical'] .tagline {
+  font-weight: 300;
+  font-size: 1.25rem;
+  line-height: 1.4;
+}
+
+html[data-vibe='clinical'] .issue-card,
+html[data-vibe='clinical'] .journal-card {
+  padding: var(--space-4) 0;
+}
+
+html[data-vibe='clinical'] .issue-card footer .labels li {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+html[data-vibe='clinical'] hr,
+html[data-vibe='clinical'] .issue-card,
+html[data-vibe='clinical'] .journal-card {
+  border-color: var(--color-border);
+}
+
+html[data-vibe='clinical'] a {
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+}
