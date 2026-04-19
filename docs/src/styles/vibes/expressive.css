@@ -1,0 +1,95 @@
+/* expressive — large type scale, saturated accent used prominently. */
+
+html[data-vibe='expressive'] {
+  --color-bg: #fffbf5;
+  --color-surface: #fef3e8;
+  --color-text: #1a0933;
+  --color-text-muted: #4a3a66;
+  --color-border: #f0e4d4;
+  --measure: 70ch;
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-vibe='expressive'] {
+    --color-bg: #0f0718;
+    --color-surface: #1a0f2e;
+    --color-text: #fffbf5;
+    --color-text-muted: #c9b8e0;
+    --color-border: #3a2a52;
+  }
+}
+
+html[data-vibe='expressive'] body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+html[data-vibe='expressive'] h1,
+html[data-vibe='expressive'] h2,
+html[data-vibe='expressive'] h3 {
+  font-family: inherit;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+html[data-vibe='expressive'] h1 {
+  font-size: clamp(2.25rem, 5vw, 3.75rem);
+  margin-bottom: var(--space-4);
+  background: linear-gradient(120deg, var(--accent-on-surface), var(--color-text));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+html[data-vibe='expressive'] h2 {
+  font-size: 1.8rem;
+  margin-top: var(--space-6);
+}
+
+html[data-vibe='expressive'] header.site .brand {
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  color: var(--accent-on-surface);
+}
+
+html[data-vibe='expressive'] header.site nav a {
+  font-weight: 600;
+}
+
+html[data-vibe='expressive'] .tagline {
+  font-weight: 500;
+  font-size: 1.3rem;
+  color: var(--color-text);
+  opacity: 0.85;
+}
+
+html[data-vibe='expressive'] .issue-card,
+html[data-vibe='expressive'] .journal-card {
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+html[data-vibe='expressive'] .issue-card header a,
+html[data-vibe='expressive'] .journal-card h2 a {
+  font-weight: 700;
+}
+
+html[data-vibe='expressive'] .issue-card footer .labels li {
+  background: var(--color-bg);
+  border-color: var(--accent-on-surface);
+  color: var(--accent-on-surface);
+  font-weight: 600;
+}
+
+html[data-vibe='expressive'] button {
+  font-weight: 700;
+  padding: var(--space-3) var(--space-5);
+  border-radius: 999px;
+}

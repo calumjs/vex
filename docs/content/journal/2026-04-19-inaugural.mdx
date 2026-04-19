@@ -1,0 +1,44 @@
+---
+title: "Inaugural post: vex so far"
+date: "2026-04-19"
+summary: "A catch-up on the first two days of vex — what shipped, what was reverted, what's queued up."
+tags: ["inaugural"]
+generatedBy: "docent"
+generatedAt: "2026-04-19T04:48:42Z"
+mode: "init"
+commitRange: "e70ec68..4fe51b2"
+---
+
+`vex` is a semantic-search CLI whose differentiator is that it has no index. It embeds your query and the candidate chunks at query time and leans on a BM25 pre-filter to keep the neural work cheap. This post covers everything between the first commit (`e70ec68`, 2026-04-13) and the current head of `master` (`4fe51b2`, 2026-04-14).
+
+## First commit and the architectural line
+
+`e70ec68` ("Initial release: NPU-accelerated semantic grep") set the shape the project still follows: walk files, keyword-score, tree-sitter chunk the survivors, BM25 pre-filter, embed query and candidates, rank by cosine. The README landed in `80d39ae`; `485f6b9` added PATH setup instructions once the install story had been tried on a cold Windows install.
+
+## The 119x speedup
+
+`734298d` ("Optimize embedding pipeline: 53s → 450ms") is the biggest performance change in the repo so far. Parallelising the CPU path and tightening the BM25 funnel cut the cold query from 53 seconds to under half a second. This is the commit that made the indexless design defensible — a 53-second query would have forced an index; sub-second means the indexless story holds.
+
+## Hybrid search: `--literal` and path boosts
+
+`84ba552` added `--literal <TERM>`, a repeatable flag that boosts files containing a keyword before the neural ranker runs. It's the escape hatch when the user knows the exact vocabulary — `vex "race conditions" --literal lock --literal mutex` puts the locking primitives at the top. The same commit introduced path-based candidate boosting so matches in `src/` rank above matches in `tests/` or `target/` without needing an explicit filter.
+
+## NPU support, and a caching feature that didn't survive
+
+`8cddf81` wired up QNN context caching for `--device npu`, targeting the Snapdragon X Elite's Hexagon NPU. Later, `6c4e87f` (PR [#3](https://github.com/calumjs/vex/pull/3)) landed a chunk-level embedding cache — and then `ac8f695` ripped it back out. The cache invalidation story cost more complexity than it bought given how fast the cold path already was. Worth recording: the cache was a real merged feature, not a proposal, and it's a rare case of code shipped and then consciously removed.
+
+## GitHub sync: code and discussions in one search
+
+`fc56053` introduced `vex sync github`, which materializes issues and PRs as local Markdown files under `~/.local/share/vex/sources/github/owner/repo/` with YAML frontmatter. `42c85cb` then made synced issues appear automatically in every `vex` search — querying "why did we change the auth flow" returns the PR discussion beside the implementation. Sync is incremental via a watermark in `.meta/sync-state.json`; `--force` resets it.
+
+## Language coverage and Claude Code integration
+
+`07adcba` bundled eleven search-quality improvements with C# tree-sitter support; `aa021ef` finalised C# on the supported-languages list. In parallel, `32ce92a` added the `/vex` [Claude Code](https://claude.com/claude-code) skill plugin, and `ad93053` / `79f0f0d` taught the plugin synonym expansion, follow-up queries, and flow tracing. The explicit goal is that one `vex` call replaces ten-to-fifteen grep/glob/read calls from an agent — fewer tool roundtrips, smaller context footprint.
+
+## Dogfooding tail
+
+`2b42ed5` and `7cec00a` ("Fix 3 issues found from dogfooding" / "Fix 4 edge cases found from dogfooding") caught the shakedown bugs that only appear when the tool runs against real repos instead of test fixtures. `4fe51b2` cleaned up stale `--no-cache` references in the skill docs, closing out the first stretch of work.
+
+## What's next
+
+Nothing tagged as a release yet, so the [changelog](../changelog/) is intentionally thin. The [status page](../status/) shows zero open issues at the moment — if you hit one, [open one](https://github.com/calumjs/vex/issues/new). Future posts land weekly per the cadence in `docent.config.json`.

@@ -1,0 +1,28 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import JournalCard from '../../components/JournalCard.astro';
+
+const base = import.meta.env.BASE_URL;
+
+const modules = import.meta.glob<{
+  frontmatter: { title: string; date: string; summary?: string; tags?: string[] };
+}>('../../../content/journal/*.mdx', { eager: true });
+
+const posts = Object.entries(modules)
+  .map(([path, mod]) => {
+    const slug = path.split('/').pop()!.replace(/\.mdx$/, '');
+    return {
+      frontmatter: mod.frontmatter,
+      url: `${base}journal/${slug}/`,
+    };
+  })
+  .sort((a, b) => b.frontmatter.date.localeCompare(a.frontmatter.date));
+---
+
+<BaseLayout title="Journal" description="What's been happening">
+  <h1>Journal</h1>
+  <p class="meta">Notes on what's been happening in the project.</p>
+  <div class="journal-list">
+    {posts.map((post) => <JournalCard post={post} />)}
+  </div>
+</BaseLayout>

@@ -1,0 +1,28 @@
+---
+import config from '../../../docent.config.json';
+
+const { sections } = config;
+const base = import.meta.env.BASE_URL;
+
+const links = [
+  { href: base, label: 'Overview', enabled: sections.overview },
+  { href: `${base}journal/`, label: 'Journal', enabled: sections.journal },
+  { href: `${base}status/`, label: 'Status', enabled: sections.status },
+  { href: `${base}changelog/`, label: 'Changelog', enabled: sections.changelog },
+].filter((l) => l.enabled);
+
+const current = Astro.url.pathname;
+---
+
+<header class="site">
+  <a class="brand" href={base}>{config.project.name}</a>
+  <nav>
+    {
+      links.map((l) => (
+        <a href={l.href} aria-current={current === l.href ? 'page' : undefined}>
+          {l.label}
+        </a>
+      ))
+    }
+  </nav>
+</header>
