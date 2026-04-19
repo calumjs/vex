@@ -1,0 +1,46 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import type { AstroComponentFactory } from 'astro/runtime/server/index.js';
+
+interface JournalModule {
+  default: AstroComponentFactory;
+  frontmatter: {
+    title: string;
+    date: string;
+    summary?: string;
+    tags?: string[];
+  };
+}
+
+export async function getStaticPaths() {
+  const modules = import.meta.glob<JournalModule>(
+    '../../../content/journal/*.mdx',
+    { eager: true }
+  );
+  return Object.entries(modules).map(([path, mod]) => {
+    const slug = path.split('/').pop()!.replace(/\.mdx$/, '');
+    return {
+      params: { slug },
+      props: { Content: mod.default, frontmatter: mod.frontmatter },
+    };
+  });
+}
+
+const { Content, frontmatter } = Astro.props;
+const displayDate = new Date(frontmatter.date).toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+---
+
+<BaseLayout title={frontmatter.title} description={frontmatter.summary}>
+  <article class="journal-post">
+    <header>
+      <time datetime={frontmatter.date}>{displayDate}</time>
+      <h1>{frontmatter.title}</h1>
+      {frontmatter.summary && <p class="summary">{frontmatter.summary}</p>}
+    </header>
+    <Content />
+  </article>
+</BaseLayout>

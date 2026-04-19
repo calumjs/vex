@@ -1,0 +1,41 @@
+---
+title: "First-week shape: indexless search, a 119× speedup, and a caching rewind"
+date: "2026-04-14"
+summary: "Looking back at the first ISO week of vex — 23 commits that set the indexless architecture, cut cold latency by two orders of magnitude, added GitHub sync, and shipped and then removed a cache."
+tags: ["backfill"]
+generatedBy: "docent"
+generatedAt: "2026-04-19T05:07:55Z"
+mode: "backfill"
+commitRange: "e70ec68..4fe51b2"
+bodyHash: "24c9075f49765360d0ba64dcebc797a8557b4abdd0ab8d5df9861e6a37bf7a29"
+---
+
+Looking at the commits between `e70ec68` (2026-04-13) and `4fe51b2` (2026-04-14), the first week of `vex` covers 23 commits across two calendar days. The shape of the work was: get the core pipeline onto disk, slash cold latency hard enough that the "no index" story becomes defensible, then add enough surface area — GitHub sync, Claude Code integration, C# support — that the tool becomes useful outside toy fixtures.
+
+## The architectural line
+
+`e70ec68` ("Initial release: NPU-accelerated semantic grep") set the pipeline the rest of the week elaborated on: walk files, keyword-score, tree-sitter chunk, BM25 pre-filter, embed query and candidates, rank by cosine. The README followed in `80d39ae`, and `485f6b9` added PATH setup once the install flow had been tried on a cold Windows machine. No surprises; the commit log reads as a standard "bootstrap a Rust CLI" sequence.
+
+## The 119× speedup
+
+`734298d` ("Optimize embedding pipeline: 53s → 450ms") is the single most load-bearing commit in this period. The commit message records a 119× reduction in cold query latency — achieved by parallelising the CPU path and tightening the BM25 funnel so the neural model only scores a few dozen chunks per query, even on large trees. Without this change, the indexless design would not hold up: a 53-second cold query forces users into a pre-built index. Sub-second cold means query-time embedding is viable in production.
+
+## Hybrid search: `--literal` and path boosts
+
+`84ba552` added `--literal <TERM>`, a repeatable flag that boosts files containing a specific keyword before the neural ranker runs — the escape hatch when the user already knows the vocabulary (`vex "race conditions" --literal lock --literal mutex`). The same commit introduced path-based candidate boosting: matches in `src/` outrank matches in `tests/` or `target/` without needing an explicit filter.
+
+## NPU support, and a caching feature that didn't survive
+
+`8cddf81` wired up QNN context caching for `--device npu`, targeting the Snapdragon X Elite's Hexagon NPU. Later, `6c4e87f` (PR [#3](https://github.com/calumjs/vex/pull/3)) landed a chunk-level embedding cache — and `ac8f695` removed it three commits later. From the commit messages alone, the rationale appears to be that the cache-invalidation story cost more than it bought given how fast the cold path had become after `734298d`. Worth recording: this was a real merged feature that shipped and was taken back out, not a proposal. The archive preserves both.
+
+## GitHub sync: code and discussions in one search
+
+`fc56053` introduced `vex sync github`, which materializes issues and PRs as Markdown under `~/.local/share/vex/sources/github/owner/repo/` with YAML frontmatter. `42c85cb` then made synced issues appear automatically in every `vex` search — querying "why did we change the auth flow" returns the PR discussion alongside the implementation. Sync is incremental via a watermark in `.meta/sync-state.json`; `--force` resets it.
+
+## Language coverage and the Claude Code skill
+
+`07adcba` bundled eleven search-quality improvements with C# tree-sitter support; `aa021ef` formalised C# on the supported-languages list. `32ce92a` published the `/vex` [Claude Code](https://claude.com/claude-code) skill plugin, and `ad93053` / `79f0f0d` taught the plugin synonym expansion, follow-up queries, and flow tracing. The explicit intent recorded in the commits: one `vex` call should replace ten-to-fifteen grep/glob/read calls from an agent.
+
+## Dogfooding tail
+
+`2b42ed5` and `7cec00a` ("Fix 3 issues found from dogfooding" / "Fix 4 edge cases found from dogfooding") caught the shakedown bugs that only appear when the tool runs against real repositories. `4fe51b2` cleaned up stale `--no-cache` references in the skill docs, closing out the week.
