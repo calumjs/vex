@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/calumjs/docent/master/skills/docent/schemas/config.schema.json",
+  "project": {
+    "name": "vex",
+    "owner": "calumjs",
+    "repo": "vex",
+    "homepage": "https://calumjs.github.io/vex"
+  },
+  "tone": "technical",
+  "sections": {
+    "overview": true,
+    "journal": true,
+    "status": true,
+    "changelog": true,
+    "bugReport": true,
+    "featureRequest": true
+  },
+  "journal": {
+    "cadence": "weekly",
+    "announceReleases": true,
+    "minCommitsPerPost": 3,
+    "backfill": true,
+    "backfillLimit": 12
+  },
+  "status": {
+    "groupStrategy": "auto",
+    "excludeLabels": ["wontfix", "duplicate", "invalid"]
+  },
+  "deploy": {
+    "target": "github-pages",
+    "customDomain": null
+  }
+}

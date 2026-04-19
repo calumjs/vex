@@ -1,0 +1,66 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import config from '../../../docent.config.json';
+
+const issueUrl = `https://github.com/${config.project.owner}/${config.project.repo}/issues/new`;
+---
+
+<BaseLayout
+  title="Report a bug"
+  description="Open a pre-filled GitHub issue describing a bug"
+>
+  <h1>Report a bug</h1>
+  <p>
+    This form opens a pre-filled issue on GitHub in a new tab. Nothing you type
+    here is sent anywhere until you submit it there.
+  </p>
+  <form id="bug-form">
+    <label>
+      Title
+      <input name="title" type="text" required />
+    </label>
+    <label>
+      What happened?
+      <textarea name="description" rows="4" required></textarea>
+    </label>
+    <label>
+      Steps to reproduce
+      <textarea name="steps" rows="3"></textarea>
+    </label>
+    <label>
+      Expected vs. actual behavior
+      <textarea name="expected" rows="2"></textarea>
+    </label>
+    <label>
+      Environment (OS, browser, version)
+      <input name="env" type="text" />
+    </label>
+    <button type="submit">Open on GitHub</button>
+  </form>
+
+  <script is:inline define:vars={{ issueUrl }}>
+    document.getElementById('bug-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const body = [
+        '## What happened?',
+        f.get('description') || '',
+        '',
+        '## Steps to reproduce',
+        f.get('steps') || '_(not provided)_',
+        '',
+        '## Expected vs. actual',
+        f.get('expected') || '_(not provided)_',
+        '',
+        '## Environment',
+        f.get('env') || '_(not provided)_',
+      ].join('\n');
+      const params = new URLSearchParams({
+        title: f.get('title') || '',
+        body,
+        labels: 'bug',
+      });
+      window.open(issueUrl + '?' + params.toString(), '_blank', 'noopener');
+    });
+  </script>
+</BaseLayout>

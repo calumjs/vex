@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/calumjs/docent/master/skills/docent/schemas/theme.schema.json",
+  "vibe": "technical",
+  "accent": "#0284c7",
+  "accentDark": "#38bdf8",
+  "heroImage": null,
+  "signals": {
+    "source": "metadata-heuristic",
+    "reasoning": "Rust CLI for semantic code search — systems/devtools profile, no logo or badge signal; picked the technical vibe with its default slate-blue accent."
+  }
+}

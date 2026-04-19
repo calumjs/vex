@@ -1,0 +1,29 @@
+---
+import config from '../../../docent.config.json';
+
+const { owner, repo } = config.project;
+const { sections } = config;
+const base = import.meta.env.BASE_URL;
+const repoUrl = `https://github.com/${owner}/${repo}`;
+---
+
+<footer class="site">
+  <p>
+    <a href={repoUrl}>Source on GitHub</a>
+    {sections.bugReport && (
+      <>
+        {' · '}
+        <a href={`${base}report-bug/`}>Report a bug</a>
+      </>
+    )}
+    {sections.featureRequest && (
+      <>
+        {' · '}
+        <a href={`${base}request-feature/`}>Request a feature</a>
+      </>
+    )}
+  </p>
+  <p class="colophon">
+    Maintained with <a href="https://github.com/">Docent</a>.
+  </p>
+</footer>
