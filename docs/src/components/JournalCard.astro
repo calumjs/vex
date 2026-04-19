@@ -1,0 +1,27 @@
+---
+export interface Props {
+  post: {
+    frontmatter: {
+      title: string;
+      date: string;
+      summary?: string;
+      tags?: string[];
+    };
+    url: string;
+  };
+}
+
+const { post } = Astro.props;
+const { title, date, summary } = post.frontmatter;
+const displayDate = new Date(date).toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+---
+
+<article class="journal-card">
+  <time datetime={date}>{displayDate}</time>
+  <h2><a href={post.url}>{title}</a></h2>
+  {summary && <p>{summary}</p>}
+</article>

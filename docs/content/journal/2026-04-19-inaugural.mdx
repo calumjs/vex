@@ -1,0 +1,44 @@
+---
+title: "Inaugural post: vex, from first commit to now"
+date: "2026-04-19"
+summary: "Catch-up on the first two days of vex — what shipped, what was cut, what's next."
+tags: ["inaugural"]
+generatedBy: "docent"
+generatedAt: "2026-04-19T01:59:06Z"
+mode: "init"
+commitRange: "e70ec68..4fe51b2"
+---
+
+`vex` is a semantic-search CLI written in Rust. Its differentiator is that it has no index — it embeds your query and the candidate chunks at query time, leaning on a BM25 pre-filter to keep the neural work cheap. This post covers what happened between the first commit (`e70ec68`, 2026-04-13) and the head of `master` (`4fe51b2`, 2026-04-14).
+
+## First commit and the architectural line
+
+`e70ec68` ("Initial release: NPU-accelerated semantic grep") set the shape the project still follows: walk files, keyword-score, tree-sitter chunk the survivors, BM25 pre-filter, embed query and candidates, rank by cosine. The README landed shortly after in `80d39ae`, and `485f6b9` added PATH setup instructions once the install flow had been tried on a fresh Windows box.
+
+## The 119x speedup
+
+`734298d` ("Optimize embedding pipeline: 53s → 450ms") is the single biggest performance change in the repo so far. The speedup came from parallelising the CPU path and tightening the BM25 funnel — the neural model now only sees a few dozen chunks per query even on large trees. This is the change that made query-time embedding defensible: a 53-second cold query would have forced an index; sub-second means the indexless story works.
+
+## Hybrid search: `--literal` and path boosts
+
+`84ba552` added `--literal <TERM>`, a repeatable flag that boosts files containing a specific keyword before the neural ranker runs. It's the escape hatch for the case where the user knows the exact vocabulary the code uses — `vex "race conditions" --literal lock --literal mutex` puts the locking primitives at the top. Same commit introduced path-based candidate boosting so hits in `src/` rank above hits in `tests/` or `target/` without needing an explicit filter.
+
+## NPU support, and a caching feature that didn't last
+
+`8cddf81` wired up QNN context caching for `--device npu`, targeting the Snapdragon X Elite's Hexagon NPU. Later, `6c4e87f` (PR [#3](https://github.com/calumjs/vex/pull/3)) landed a chunk-level embedding cache — and then `ac8f695` ripped it back out. The cache invalidation story cost more complexity than it saved given how fast the cold path already was. Worth recording that the cache was a real merged feature, not a proposal: it shipped and was removed.
+
+## GitHub sync: search code and discussions together
+
+`fc56053` introduced `vex sync github`, which materializes issues and PRs as local Markdown files under `~/.local/share/vex/sources/github/owner/repo/` with YAML frontmatter. `42c85cb` then made synced issues show up automatically in every `vex` search — so querying for "why did we change the auth flow" returns the PR discussion next to the implementation. Sync is incremental: a watermark in `.meta/sync-state.json` tracks the last-fetched position, and `--force` resets it.
+
+## Language coverage and the Claude Code skill
+
+`07adcba` bundled eleven search-quality improvements with C# tree-sitter support; `aa021ef` finalised C# on the supported-languages list. In parallel, `32ce92a` published the `/vex` Claude Code skill plugin, and `ad93053` / `79f0f0d` taught the plugin to do synonym expansion, follow-up queries, and flow tracing. The explicit goal is that one `vex` call replaces ten-to-fifteen grep/glob/read calls from an agent — fewer tool roundtrips, smaller context footprint.
+
+## Dogfooding tail
+
+`2b42ed5` and `7cec00a` ("Fix 3 issues found from dogfooding" / "Fix 4 edge cases found from dogfooding") captured the shakedown bugs that only show up when the tool is run against real repositories rather than test fixtures. `4fe51b2` cleaned up stale `--no-cache` references from the skill docs, closing out the first stretch of work.
+
+## What's next
+
+Nothing tagged as a release yet, so the [changelog](../changelog/) is intentionally thin. The [status page](../status/) shows no open issues at the moment — if you hit one, [open one](https://github.com/calumjs/vex/issues/new). Future posts land weekly per the journal cadence in `docent.config.json`.

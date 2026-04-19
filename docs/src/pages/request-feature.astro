@@ -1,0 +1,59 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import config from '../../../docent.config.json';
+
+const issueUrl = `https://github.com/${config.project.owner}/${config.project.repo}/issues/new`;
+---
+
+<BaseLayout
+  title="Request a feature"
+  description="Open a pre-filled GitHub issue proposing a feature"
+>
+  <h1>Request a feature</h1>
+  <p>
+    This form opens a pre-filled issue on GitHub in a new tab. Nothing you type
+    here is sent anywhere until you submit it there.
+  </p>
+  <form id="feature-form">
+    <label>
+      Title
+      <input name="title" type="text" required />
+    </label>
+    <label>
+      What would you like to see?
+      <textarea name="description" rows="4" required></textarea>
+    </label>
+    <label>
+      What problem does it solve? (your use case)
+      <textarea name="use_case" rows="3"></textarea>
+    </label>
+    <label>
+      Alternatives considered
+      <textarea name="alternatives" rows="2"></textarea>
+    </label>
+    <button type="submit">Open on GitHub</button>
+  </form>
+
+  <script is:inline define:vars={{ issueUrl }}>
+    document.getElementById('feature-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const body = [
+        '## What would you like to see?',
+        f.get('description') || '',
+        '',
+        '## Use case',
+        f.get('use_case') || '_(not provided)_',
+        '',
+        '## Alternatives considered',
+        f.get('alternatives') || '_(not provided)_',
+      ].join('\n');
+      const params = new URLSearchParams({
+        title: f.get('title') || '',
+        body,
+        labels: 'enhancement',
+      });
+      window.open(issueUrl + '?' + params.toString(), '_blank', 'noopener');
+    });
+  </script>
+</BaseLayout>

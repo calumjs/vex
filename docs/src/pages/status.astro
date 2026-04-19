@@ -1,0 +1,33 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import IssueCard from '../components/IssueCard.astro';
+import status from '../../content/status.json';
+
+const updatedAt = new Date(status.generatedAt).toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+---
+
+<BaseLayout title="Status" description={`${status.openIssueCount} open issues`}>
+  <h1>Status</h1>
+  <p class="meta">
+    {status.openIssueCount} open {status.openIssueCount === 1 ? 'issue' : 'issues'}
+    {' · updated '}
+    <time datetime={status.generatedAt}>{updatedAt}</time>
+  </p>
+  {
+    status.groups.map((group: any) => (
+      <section class="status-group">
+        <h2>{group.label}</h2>
+        {group.description && <p>{group.description}</p>}
+        <div class="issues">
+          {group.issues.map((issue: any) => (
+            <IssueCard issue={issue} />
+          ))}
+        </div>
+      </section>
+    ))
+  }
+</BaseLayout>

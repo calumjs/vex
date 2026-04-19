@@ -1,0 +1,44 @@
+---
+title: "vex"
+tagline: "Vector Examine — semantic grep for code and engineering context"
+generatedBy: "docent"
+generatedAt: "2026-04-19T01:59:06Z"
+mode: "init"
+---
+
+`vex` searches code and engineering context by meaning instead of by token. It's a single Rust binary (`cargo install --git https://github.com/calumjs/vex`) with no index, no database, and no background process. Point it at a directory, ask a question in plain English, get ranked results in under a second.
+
+```
+vex "error handling with retries" src/
+```
+
+## What it's for
+
+`grep` and `ripgrep` match the letters you type. That's fine when you already know the vocabulary the code uses — but on a codebase of any size, you often don't. Searching for `retry` misses a function called `fetch_with_backoff`. Searching for `authentication` misses the PR discussion about session management. The context exists; the keyword search can't bridge the vocabulary gap.
+
+`vex` closes that gap at query time. It embeds your natural-language query and the candidate chunks with a small local model, ranks by cosine similarity, and returns hits that are semantically — not lexically — closest. The same binary also searches GitHub issues and PRs if you've synced them (`vex sync github`), so one query returns the code **and** the discussions that motivated it.
+
+## How it works
+
+A query triggers a pipeline:
+
+1. Walk files respecting `.gitignore` and `.vexignore`
+2. Score files by query keyword overlap — files with no overlap are dropped
+3. Chunk top files with tree-sitter (function/class boundaries) for supported languages — Rust, Python, JavaScript, TypeScript, Go, C, C++, Java, C# — or paragraph/sliding-window for prose
+4. BM25 pre-filter narrows to the top candidates
+5. Embed query + candidates with `all-MiniLM-L6-v2` (384-dim, INT8 quantized) via ONNX Runtime
+6. Rank by cosine similarity and return top-k
+
+Steps 2–4 eliminate >99% of chunks before the neural model runs. That's why query-time embedding is viable: on a Snapdragon X Elite, a 19k-file monorepo returns results cold in 729ms.
+
+Command-line flags cover the common shape of searches — `-g "*.cs"` to glob by file type, `--literal mutex` to pin a keyword hint, `-k 3` to cap results, `-t 0.3` to floor the similarity score, `--json` for scripting, `--fast` for binary quantization on very large trees.
+
+## Getting started
+
+Install with `cargo install --git https://github.com/calumjs/vex`. The embedding model (~23 MB) downloads on first run. See the [README](https://github.com/calumjs/vex#install) for PATH setup on Windows and for the optional `/vex` [Claude Code](https://claude.com/claude-code) skill — a slash command that teaches an agent to use vex effectively (synonym expansion, follow-up queries, flow tracing). One `vex` call typically replaces 10–15 grep/glob/read calls from an agent, which saves tokens and keeps the context window breathable.
+
+## Further reading
+
+- [Journal](./journal/) — what has shipped, week by week
+- [Status](./status/) — currently-open issues, grouped
+- [Source](https://github.com/calumjs/vex) — the repo itself
