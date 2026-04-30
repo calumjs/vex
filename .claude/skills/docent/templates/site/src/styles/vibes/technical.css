@@ -1,0 +1,87 @@
+/* technical — sans + mono, cool slate palette, dense grid. */
+
+html[data-vibe='technical'] {
+  --color-bg: #f8fafc;
+  --color-surface: #e2e8f0;
+  --color-text: #0f172a;
+  --color-text-muted: #475569;
+  --color-border: #cbd5e1;
+  --measure: 74ch;
+  --radius: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-vibe='technical'] {
+    --color-bg: #0b1120;
+    --color-surface: #1e293b;
+    --color-text: #e2e8f0;
+    --color-text-muted: #94a3b8;
+    --color-border: #334155;
+  }
+}
+
+html[data-vibe='technical'] body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  font-feature-settings: 'ss01', 'cv11';
+}
+
+html[data-vibe='technical'] h1,
+html[data-vibe='technical'] h2,
+html[data-vibe='technical'] h3 {
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+html[data-vibe='technical'] h1 {
+  font-size: 2rem;
+}
+
+html[data-vibe='technical'] h2 {
+  font-size: 1.3rem;
+  margin-top: var(--space-5);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+html[data-vibe='technical'] header.site {
+  border-bottom: 1px solid var(--color-border);
+  padding-block: var(--space-3);
+}
+
+html[data-vibe='technical'] header.site .brand {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+html[data-vibe='technical'] header.site .brand::before {
+  content: '$ ';
+  color: var(--accent-on-surface);
+}
+
+html[data-vibe='technical'] header.site nav a {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+html[data-vibe='technical'] .tagline {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+}
+
+html[data-vibe='technical'] .issue-card header a,
+html[data-vibe='technical'] .journal-card h2 a {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+}
+
+html[data-vibe='technical'] .issue-card footer .labels li {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  background: var(--color-surface);
+  border-color: transparent;
+}

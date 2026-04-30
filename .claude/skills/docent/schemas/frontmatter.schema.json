@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frontmatter.schema.json",
+  "title": "Docent MDX frontmatter conventions",
+  "description": "Common fields for all Docent-generated MDX files. Specific content types add fields on top.",
+  "type": "object",
+  "required": ["generatedBy", "generatedAt", "mode"],
+  "properties": {
+    "generatedBy": { "type": "string", "const": "docent" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "mode": {
+      "type": "string",
+      "enum": ["init", "update", "digest", "release", "triage", "backfill"]
+    },
+    "title": { "type": "string" },
+    "tagline": { "type": "string", "maxLength": 70 },
+    "summary": { "type": "string" },
+    "date": { "type": "string", "format": "date" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "commitRange": { "type": "string" },
+
+    "sourceCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "The git commit this content was derived from, when the derivation is a function of the whole repo state (e.g. the changelog at a given HEAD). Update mode compares this to `git rev-parse HEAD` to decide whether to regenerate."
+    },
+
+    "sourceFiles": {
+      "type": "array",
+      "description": "Specific files this content was derived from, recorded so `update` can detect staleness via blob sha. For single-source content like overview.mdx (primarily from README.md).",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Repo-relative path to the source file."
+          },
+          "sha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$",
+            "description": "Output of `git hash-object <path>` at generation time. Update mode recomputes this and skips regeneration if unchanged."
+          }
+        }
+      }
+    },
+
+    "sourceSnapshot": {
+      "type": "object",
+      "description": "State snapshot for content derived from external sources (e.g. GitHub Issues API) rather than the repo itself. Update mode compares a current snapshot to this recorded one and regenerates only if they differ. Fields are content-type specific.",
+      "additionalProperties": true
+    },
+
+    "bodyHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the file body (everything after the closing `---` of the frontmatter), recorded at generation time. Update mode uses this as the content-based hand-edit detector: if the current body hash differs from this value, the file was edited by a human and must not be regenerated — regardless of the commit-subject heuristic. Machine-owned files have matching hashes; human-edited files don't."
+    }
+  }
+}

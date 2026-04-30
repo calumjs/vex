@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "docent.theme.schema.json",
+  "title": "Docent theme",
+  "description": "Visual theme derived from the host repo at init time. Written once; not modified by scheduled runs.",
+  "type": "object",
+  "required": ["vibe", "accent", "accentDark", "signals"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "vibe": {
+      "type": "string",
+      "enum": ["editorial", "technical", "clinical", "expressive"],
+      "description": "Which of the four vibe stylesheets the template should load."
+    },
+    "accent": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "description": "Accent color for light mode, as a hex string."
+    },
+    "accentDark": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "description": "Accent color for dark mode, as a hex string. If only a light-mode color is known, derive a contrast-adjusted complement."
+    },
+    "heroImage": {
+      "type": ["string", "null"],
+      "description": "Path under /docs/public/ to a brand asset (logo, banner) copied from the host repo, or null if none was found."
+    },
+    "signals": {
+      "type": "object",
+      "required": ["source", "reasoning"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["logo-analysis", "readme-badges", "metadata-heuristic", "default"],
+          "description": "Where the design decision came from, for debuggability."
+        },
+        "reasoning": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 240,
+          "description": "One short sentence explaining the choice. A human reviewing the init PR reads this."
+        }
+      }
+    }
+  }
+}

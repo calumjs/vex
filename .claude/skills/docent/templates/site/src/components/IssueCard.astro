@@ -1,0 +1,40 @@
+---
+export interface Issue {
+  number: number;
+  title: string;
+  summary: string;
+  url: string;
+  updatedAt: string;
+  labels: string[];
+}
+
+export interface Props {
+  issue: Issue;
+}
+
+const { issue } = Astro.props;
+const date = new Date(issue.updatedAt).toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+});
+---
+
+<article class="issue-card">
+  <header>
+    <a href={issue.url}>#{issue.number} — {issue.title}</a>
+  </header>
+  <p>{issue.summary}</p>
+  <footer>
+    <time datetime={issue.updatedAt}>{date}</time>
+    {
+      issue.labels.length > 0 && (
+        <ul class="labels">
+          {issue.labels.map((l) => (
+            <li>{l}</li>
+          ))}
+        </ul>
+      )
+    }
+  </footer>
+</article>

@@ -1,0 +1,80 @@
+/* editorial — serif display, warm neutrals, generous rhythm. */
+
+html[data-vibe='editorial'] {
+  --color-bg: #fdfbf7;
+  --color-surface: #f5efe4;
+  --color-text: #1c1917;
+  --color-text-muted: #6b5d4e;
+  --color-border: #e8dfd0;
+  --measure: 64ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-vibe='editorial'] {
+    --color-bg: #14110d;
+    --color-surface: #20190f;
+    --color-text: #f5efe4;
+    --color-text-muted: #a89c86;
+    --color-border: #3a2f21;
+  }
+}
+
+html[data-vibe='editorial'] body {
+  font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  font-size: 17px;
+  line-height: 1.75;
+}
+
+html[data-vibe='editorial'] h1,
+html[data-vibe='editorial'] h2,
+html[data-vibe='editorial'] h3 {
+  font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+html[data-vibe='editorial'] h1 {
+  font-size: 2.4rem;
+  margin-bottom: var(--space-3);
+}
+
+html[data-vibe='editorial'] h2 {
+  font-size: 1.6rem;
+  margin-top: var(--space-6);
+}
+
+html[data-vibe='editorial'] .tagline {
+  font-style: italic;
+  font-size: 1.2rem;
+}
+
+html[data-vibe='editorial'] header.site .brand {
+  font-family: inherit;
+  font-size: 1.15rem;
+  font-style: italic;
+}
+
+html[data-vibe='editorial'] header.site nav a,
+html[data-vibe='editorial'] .issue-card footer,
+html[data-vibe='editorial'] .journal-card time,
+html[data-vibe='editorial'] .meta {
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+html[data-vibe='editorial'] article.journal-post header h1 {
+  font-size: 2.6rem;
+  line-height: 1.15;
+}
+
+html[data-vibe='editorial'] article.journal-post p:first-of-type::first-letter {
+  font-size: 3.2rem;
+  float: left;
+  line-height: 0.85;
+  padding: 0.3rem 0.4rem 0 0;
+  font-weight: 700;
+  color: var(--accent-on-surface);
+}

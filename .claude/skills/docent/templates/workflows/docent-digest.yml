@@ -1,0 +1,33 @@
+# OPTIONAL — only for users who prefer GitHub Actions over Claude Code
+# Routines (see SPEC §6.7). `init` mode does NOT copy this file by default.
+# To use: copy into .github/workflows/ and add ANTHROPIC_API_KEY as a repo
+# secret.
+
+name: Docent digest
+on:
+  schedule:
+    - cron: '17 9 * * 1'    # Mondays ~09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+concurrency:
+  group: docent-content-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Docent digest
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt: "Docent: run digest mode."
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "docent.config.schema.json",
+  "title": "Docent config",
+  "type": "object",
+  "required": ["project", "tone", "sections", "journal", "status", "deploy"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "project": {
+      "type": "object",
+      "required": ["name", "owner", "repo", "homepage"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "owner": { "type": "string", "minLength": 1 },
+        "repo": { "type": "string", "minLength": 1 },
+        "homepage": { "type": "string", "format": "uri" }
+      }
+    },
+    "tone": {
+      "type": "string",
+      "enum": ["neutral", "formal", "playful", "technical"]
+    },
+    "sections": {
+      "type": "object",
+      "required": ["overview", "journal", "status", "changelog", "bugReport", "featureRequest"],
+      "properties": {
+        "overview": { "type": "boolean" },
+        "journal": { "type": "boolean" },
+        "status": { "type": "boolean" },
+        "changelog": { "type": "boolean" },
+        "bugReport": { "type": "boolean" },
+        "featureRequest": { "type": "boolean" }
+      }
+    },
+    "journal": {
+      "type": "object",
+      "required": ["cadence", "announceReleases", "minCommitsPerPost"],
+      "properties": {
+        "cadence": {
+          "type": "string",
+          "enum": ["weekly", "biweekly", "monthly", "manual"]
+        },
+        "announceReleases": { "type": "boolean" },
+        "minCommitsPerPost": { "type": "integer", "minimum": 0 },
+        "backfill": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, `init` partitions git history into cadence-aligned buckets and writes one dated post per bucket instead of a single inaugural post. Posts marked `mode: \"backfill\"` are immutable to scheduled runs."
+        },
+        "backfillLimit": {
+          "type": "integer",
+          "minimum": 2,
+          "default": 12,
+          "description": "Maximum number of backfill posts `init` will generate. Caps cost on long-history repos — buckets older than the cap are collapsed into one 'Early history' roundup post. Minimum is 2 (not 1) because the collapse algorithm keeps `backfillLimit - 1` recent buckets; with a limit of 1, zero recent buckets are kept and the rollup's 'date one second before the oldest kept bucket' rule has no reference point. Users who want only one post should set `backfill: false` instead."
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "required": ["groupStrategy", "excludeLabels"],
+      "properties": {
+        "groupStrategy": { "type": "string", "enum": ["auto", "by-label"] },
+        "excludeLabels": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "deploy": {
+      "type": "object",
+      "required": ["target"],
+      "properties": {
+        "target": { "type": "string", "enum": ["github-pages"] },
+        "customDomain": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

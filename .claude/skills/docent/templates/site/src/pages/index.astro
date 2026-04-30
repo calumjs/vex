@@ -1,0 +1,19 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import theme from '../../content/theme.json';
+import Overview, { frontmatter } from '../../content/overview.mdx';
+
+const base = import.meta.env.BASE_URL;
+const hero = theme.heroImage
+  ? theme.heroImage.startsWith('/')
+    ? `${base.replace(/\/$/, '')}${theme.heroImage}`
+    : `${base}${theme.heroImage}`
+  : null;
+---
+
+<BaseLayout title={frontmatter.title} description={frontmatter.tagline}>
+  {hero && <img class="hero" src={hero} alt="" />}
+  <h1>{frontmatter.title}</h1>
+  {frontmatter.tagline && <p class="tagline">{frontmatter.tagline}</p>}
+  <Overview />
+</BaseLayout>
