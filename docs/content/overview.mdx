@@ -2,47 +2,112 @@
 title: "vex"
 tagline: "Vector Examine — semantic grep for code and engineering context"
 generatedBy: "docent"
-generatedAt: "2026-04-19T05:07:55Z"
-mode: "init"
+generatedAt: "2026-07-19T22:08:30Z"
+mode: "update"
 sourceFiles:
   - path: "README.md"
     sha: "94605712f6e9e2b400e5f8d04499a438428c1803"
-bodyHash: "e854f5ae20bb823c624cfb80c2b05e2b500aa948443a75ecea9e1dabeda5c0b9"
+bodyHash: "03ef515d3a5be5086696cf1dbbade73c3b1c4f91925d8085c946800245d562e4"
 ---
 
-`vex` is a command-line tool written in Rust that searches code and engineering context by meaning, not by token. A single binary, no index, no server, no background daemon. Point it at a directory, ask a question in plain English, and get ranked results in under a second.
+`vex` is a Rust command-line tool for semantic search over code and engineering context. No index, no server, no background process — point it at a directory, ask a question in plain English, and get results back in under a second.
 
 ```
-vex "database connection pooling" src/
+vex "error handling with retries" src/
 ```
 
-## The problem it solves
+## The problem
 
-Keyword search — `grep`, `ripgrep`, most editor search — assumes you already know the vocabulary the code uses. On any non-trivial codebase, you often don't. A search for `retry` misses `fetch_with_backoff`. A search for `authentication` misses the PR discussion about session handling. The context exists; the words are different; `grep` can't bridge the gap.
+Keyword search assumes you already know the vocabulary the code uses. Often you don't. `rg "retry"` finds nothing for a function named `fetch_with_retry`. `rg "authentication"` misses the PR discussion that became the session-management subsystem. The vocabulary gap between what you are searching for and how it was originally written is invisible to `grep`.
 
-`vex` closes the gap by embedding your query and the candidate chunks with a small local neural model and ranking by cosine similarity. The same invocation also searches GitHub issues and PRs when you've synced them (`vex sync github`), so a single query returns the implementation and the discussions that motivated it side by side.
+The same gap affects AI-assisted workflows. If Claude Code cannot locate the relevant context — the ADR explaining a design decision, the issue that motivated a refactor — it cannot use it. Context that cannot be found cannot be applied; decisions get repeated and tribal knowledge stays tribal.
 
-## How it works
+## How vex closes the gap
 
-Each query runs a short pipeline:
+**Semantic scoring at query time.** vex embeds your query and each candidate chunk using `all-MiniLM-L6-v2` (384-dim, INT8 quantized via ONNX Runtime) and ranks results by cosine similarity. The model (~23 MB) downloads automatically on first run.
 
-1. Walk files respecting `.gitignore` and `.vexignore`.
-2. Score files by keyword overlap with the query. Files with zero overlap are dropped.
-3. Chunk the top files — tree-sitter for supported languages (Rust, Python, JavaScript, TypeScript, Go, C, C++, Java, C#), paragraph/sliding-window for prose.
-4. BM25 pre-filter narrows the pool to the top candidates.
-5. Embed query and candidates with `all-MiniLM-L6-v2` (384-dim, INT8 quantized) via ONNX Runtime.
-6. Rank by cosine similarity; return top-k.
+**BM25 pre-filter keeps it fast.** A lexical pass over the top candidate files eliminates >99% of chunks before the neural model runs. A cold search over a 19,366-file monorepo completes in 729 ms on Snapdragon X Elite — no pre-indexing required.
 
-Steps 2–4 discard more than 99% of chunks before the neural model sees anything. That is what makes query-time embedding viable: a 19k-file monorepo returns cold in 729ms on a Snapdragon X Elite.
+**Code and GitHub issues in one query.** `vex sync github` materialises issues and PRs as local Markdown files. Subsequent searches automatically include them alongside code — implementation and the discussions that motivated it, ranked together.
 
-The CLI exposes the usual dials: `-k N` for result count, `-g "*.cs"` to constrain by glob, `--literal mutex` to pin a keyword boost, `-t 0.3` to floor similarity, `--json` for machine output, `--fast` for binary quantization on very large trees, `--device npu` on supported hardware.
+```bash
+vex "why did we change the auth flow"
+# → implementation file, architecture doc, PR discussion — ranked by relevance
+```
 
-## Getting started
+**Vocabulary bridging with `--literal`.** Pin a keyword to boost files that contain it before the neural ranker runs — useful when you know the right term but want semantic ranking of the results:
 
-`cargo install --git https://github.com/calumjs/vex` installs the binary. The embedding model (~23 MB) downloads automatically on first run. See the [README](https://github.com/calumjs/vex#install) for PATH setup and for the optional `/vex` [Claude Code](https://claude.com/claude-code) skill — a slash command that teaches agents to use vex effectively (synonym expansion, follow-up queries, flow tracing). One `vex` call typically replaces ten-to-fifteen grep/glob/read calls from an agent.
+```bash
+vex "code that prevents race conditions" --literal lock --literal mutex
+```
 
-## Further reading
+## Pipeline
 
-- [Journal](./journal/) — what has shipped, week by week
-- [Status](./status/) — currently-open issues
-- [Source](https://github.com/calumjs/vex) — the repo itself
+Each query runs six steps:
+
+1. Walk files in parallel, respecting `.gitignore` and `.vexignore`
+2. Score files by query keyword overlap — zero-overlap files are dropped
+3. Chunk the top 200 files: tree-sitter at function/class boundaries for supported languages, paragraph/sliding-window for prose
+4. BM25 pre-filter narrows to the top ~50 candidates
+5. Embed query and candidates (ONNX Runtime, INT8, multi-threaded)
+6. Rank by cosine similarity, return top-k
+
+Tree-sitter chunking is supported for Rust, Python, JavaScript, TypeScript, Go, C, C++, Java, and C#. All other file types fall back to paragraph/sliding-window chunking — vex works on any text file.
+
+## Install
+
+Requires [Rust](https://rustup.rs/):
+
+```bash
+cargo install --git https://github.com/calumjs/vex
+```
+
+Add `~/.cargo/bin` to `PATH` if it is not already on it. The embedding model downloads on first use.
+
+## Claude Code skill
+
+vex ships with a `/vex` skill for Claude Code that instructs the agent how to use semantic search effectively: synonym expansion, follow-up queries from different angles, and code-flow tracing. One `vex` call can replace 10–15 grep/glob/Read calls, saving tokens and context window.
+
+**Global install:**
+
+```bash
+# Linux/macOS
+mkdir -p ~/.claude/skills/vex
+cp .claude/skills/vex/SKILL.md ~/.claude/skills/vex/
+
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills\vex"
+Copy-Item .claude\skills\vex\SKILL.md "$env:USERPROFILE\.claude\skills\vex\"
+```
+
+Or clone the repo — the skill is automatically active in any Claude Code session inside it.
+
+## GitHub sync
+
+```bash
+vex sync github                        # auto-detect repo from git remote
+vex sync github calumjs/vex            # explicit owner/repo
+vex sync github --include issues,prs   # issues and PRs (default)
+vex sync github --state open           # only open items
+vex sync github --labels bug,critical  # filter by labels
+vex sync github --force                # ignore watermark, full re-sync
+```
+
+Credentials resolve in order: `gh auth token` → `GITHUB_TOKEN` → `GH_TOKEN`. Credentials are only used during sync; search runs locally over materialised Markdown. Incremental syncs are the default (watermark stored in `.meta/sync-state.json`).
+
+Search synced content like any other directory:
+
+```bash
+vex "resilience strategy" ~/.local/share/vex/sources/github/calumjs/vex/
+vex "login timeout"       ~/.local/share/vex/sources/github/calumjs/vex/issues/
+vex "refactor auth"       ~/.local/share/vex/sources/github/calumjs/vex/prs/
+```
+
+## Performance
+
+| Codebase | Files | Chunks | Cold latency |
+|---|---|---|---|
+| Small (.NET app) | 585 | 3,227 | 468 ms |
+| Large (monorepo) | 19,366 | 35,579 | 729 ms |
+
+Benchmarked on Snapdragon X Elite (12-core Oryon, ARM64). No pre-indexing, no cache, cold search every time.
