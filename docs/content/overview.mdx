@@ -1,48 +1,56 @@
 ---
 title: "vex"
-tagline: "Vector Examine — semantic grep for code and engineering context"
+tagline: "Semantic grep for code and GitHub context — no index, sub-second results"
 generatedBy: "docent"
-generatedAt: "2026-04-19T05:07:55Z"
-mode: "init"
+generatedAt: "2026-08-23T00:00:00Z"
+mode: "update"
 sourceFiles:
   - path: "README.md"
     sha: "94605712f6e9e2b400e5f8d04499a438428c1803"
-bodyHash: "e854f5ae20bb823c624cfb80c2b05e2b500aa948443a75ecea9e1dabeda5c0b9"
+bodyHash: "497e6488c64813c17314c82d49a4a8aff203acc71204de48bdfbb0dc8c65cd37"
 ---
 
-`vex` is a command-line tool written in Rust that searches code and engineering context by meaning, not by token. A single binary, no index, no server, no background daemon. Point it at a directory, ask a question in plain English, and get ranked results in under a second.
+`vex` is a CLI written in Rust that runs semantic search over a codebase — or a codebase plus synced GitHub issues — without a pre-built index. Point it at a directory with a plain-English query; it embeds and ranks candidates at query time using a local neural model, returning results in under a second on codebases up to tens of thousands of files.
+
+## The problem
+
+Keyword search assumes you already know the vocabulary the code uses. `grep "retry"` finds the word; it misses `fetch_with_retry`, `handle_failure`, and the PR titled "Resilience strategy for upstream timeouts". On any non-trivial codebase, the vocabulary gap is real. It widens as engineering context moves into GitHub discussions, ADRs, and issue threads that were never catalogued.
+
+For AI-assisted workflows the gap is a direct limitation: if the agent's file-finding tools can't surface the context, it can't be used. `vex "error handling with retries" src/` finds `fetch_with_retry` and `CircuitBreakerPolicy` without any of those words appearing in the query.
+
+## How it works
 
 ```
 vex "database connection pooling" src/
 ```
 
-## The problem it solves
+Each query runs a fixed pipeline:
 
-Keyword search — `grep`, `ripgrep`, most editor search — assumes you already know the vocabulary the code uses. On any non-trivial codebase, you often don't. A search for `retry` misses `fetch_with_backoff`. A search for `authentication` misses the PR discussion about session handling. The context exists; the words are different; `grep` can't bridge the gap.
-
-`vex` closes the gap by embedding your query and the candidate chunks with a small local neural model and ranking by cosine similarity. The same invocation also searches GitHub issues and PRs when you've synced them (`vex sync github`), so a single query returns the implementation and the discussions that motivated it side by side.
-
-## How it works
-
-Each query runs a short pipeline:
-
-1. Walk files respecting `.gitignore` and `.vexignore`.
-2. Score files by keyword overlap with the query. Files with zero overlap are dropped.
-3. Chunk the top files — tree-sitter for supported languages (Rust, Python, JavaScript, TypeScript, Go, C, C++, Java, C#), paragraph/sliding-window for prose.
-4. BM25 pre-filter narrows the pool to the top candidates.
+1. Walk files in parallel, respecting `.gitignore` and `.vexignore`.
+2. Score files by keyword overlap with the query; skip files with zero overlap.
+3. Chunk top candidates via tree-sitter at function/class boundaries (code) or sliding window (prose).
+4. Narrow with BM25 to the top ~50 candidates.
 5. Embed query and candidates with `all-MiniLM-L6-v2` (384-dim, INT8 quantized) via ONNX Runtime.
-6. Rank by cosine similarity; return top-k.
+6. Rank by cosine similarity, return top-k.
 
-Steps 2–4 discard more than 99% of chunks before the neural model sees anything. That is what makes query-time embedding viable: a 19k-file monorepo returns cold in 729ms on a Snapdragon X Elite.
+Steps 2–4 eliminate >99% of chunks before the neural model runs. That's why there's no pre-built index — the cold path is fast enough.
 
-The CLI exposes the usual dials: `-k N` for result count, `-g "*.cs"` to constrain by glob, `--literal mutex` to pin a keyword boost, `-t 0.3` to floor similarity, `--json` for machine output, `--fast` for binary quantization on very large trees, `--device npu` on supported hardware.
+**GitHub sync.** `vex sync github` materializes issues and PRs as Markdown with YAML frontmatter in `~/.local/share/vex/sources/github/`. After that, a single query spans both source code and the engineering discussions that motivated it. Incremental syncs only fetch items updated since the last run.
+
+**Tree-sitter chunking.** Supported: Rust, Python, JavaScript, TypeScript, Go, C, C++, Java, C#. All other text files fall back to paragraph/sliding-window chunking.
+
+**Claude Code skill.** `.claude/skills/vex/SKILL.md` ships a `/vex` slash command that teaches Claude how to use vex — synonym expansion via `--literal`, follow-up queries from different angles, flow tracing from a result back through call sites. One `vex` call replaces 10–15 grep/glob/read calls.
 
 ## Getting started
 
-`cargo install --git https://github.com/calumjs/vex` installs the binary. The embedding model (~23 MB) downloads automatically on first run. See the [README](https://github.com/calumjs/vex#install) for PATH setup and for the optional `/vex` [Claude Code](https://claude.com/claude-code) skill — a slash command that teaches agents to use vex effectively (synonym expansion, follow-up queries, flow tracing). One `vex` call typically replaces ten-to-fifteen grep/glob/read calls from an agent.
+Requires Rust. Install from source:
 
-## Further reading
+```bash
+cargo install --git https://github.com/calumjs/vex
+```
 
-- [Journal](./journal/) — what has shipped, week by week
-- [Status](./status/) — currently-open issues
-- [Source](https://github.com/calumjs/vex) — the repo itself
+The embedding model (~23 MB quantized) downloads automatically on first run. See the [README](https://github.com/calumjs/vex) for full install instructions, path setup on Windows and Linux/macOS, and all available CLI flags.
+
+---
+
+Work in progress is tracked on the <a href={`${import.meta.env.BASE_URL}status/`}>status page</a>. Development history is documented in the <a href={`${import.meta.env.BASE_URL}journal/`}>journal</a>.
