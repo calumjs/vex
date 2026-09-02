@@ -2,47 +2,66 @@
 title: "vex"
 tagline: "Vector Examine — semantic grep for code and engineering context"
 generatedBy: "docent"
-generatedAt: "2026-04-19T05:07:55Z"
-mode: "init"
+generatedAt: "2026-09-02T00:00:00Z"
+mode: "update"
 sourceFiles:
   - path: "README.md"
     sha: "94605712f6e9e2b400e5f8d04499a438428c1803"
-bodyHash: "e854f5ae20bb823c624cfb80c2b05e2b500aa948443a75ecea9e1dabeda5c0b9"
+bodyHash: "02fd0667fccca1406db4bdd1fca06089d254c5c25c4b07497d8de81bbfc037d1"
 ---
 
-`vex` is a command-line tool written in Rust that searches code and engineering context by meaning, not by token. A single binary, no index, no server, no background daemon. Point it at a directory, ask a question in plain English, and get ranked results in under a second.
+`vex` is a command-line tool (Rust, single binary) that searches code and engineering context by embedding similarity rather than token matching. No index, no background daemon. Walk a directory, ask a question in plain English, get ranked results in under a second.
 
 ```
-vex "database connection pooling" src/
+vex "error handling with retries" src/
 ```
 
-## The problem it solves
+```
+0.4210  src/client.rs:47
+  pub async fn fetch_with_retry(&self, url: &str) -> Result<Response> {
 
-Keyword search — `grep`, `ripgrep`, most editor search — assumes you already know the vocabulary the code uses. On any non-trivial codebase, you often don't. A search for `retry` misses `fetch_with_backoff`. A search for `authentication` misses the PR discussion about session handling. The context exists; the words are different; `grep` can't bridge the gap.
+0.3891  src/worker.rs:112
+  fn handle_failure(&mut self, task: Task) {
+```
 
-`vex` closes the gap by embedding your query and the candidate chunks with a small local neural model and ranking by cosine similarity. The same invocation also searches GitHub issues and PRs when you've synced them (`vex sync github`), so a single query returns the implementation and the discussions that motivated it side by side.
+## The vocabulary gap
 
-## How it works
+Keyword search assumes you already know what the code calls things. On any non-trivial codebase — especially one where decisions were made months ago by people who have since moved on — that assumption fails constantly. A search for `retry` misses `fetch_with_retry`. A search for `authentication` misses the PR where the session management trade-off was made.
 
-Each query runs a short pipeline:
+`vex` bridges the gap by embedding your query and the candidate chunks with `all-MiniLM-L6-v2` (384-dim, INT8 quantized, ONNX Runtime) and ranking by cosine similarity. The pipeline eliminates >99% of chunks through keyword scoring and BM25 pre-filtering before the neural model sees anything — cold search on a 19k-file monorepo completes in 729ms on a Snapdragon X Elite.
 
-1. Walk files respecting `.gitignore` and `.vexignore`.
-2. Score files by keyword overlap with the query. Files with zero overlap are dropped.
-3. Chunk the top files — tree-sitter for supported languages (Rust, Python, JavaScript, TypeScript, Go, C, C++, Java, C#), paragraph/sliding-window for prose.
-4. BM25 pre-filter narrows the pool to the top candidates.
-5. Embed query and candidates with `all-MiniLM-L6-v2` (384-dim, INT8 quantized) via ONNX Runtime.
-6. Rank by cosine similarity; return top-k.
+## Code and GitHub context in one search
 
-Steps 2–4 discard more than 99% of chunks before the neural model sees anything. That is what makes query-time embedding viable: a 19k-file monorepo returns cold in 729ms on a Snapdragon X Elite.
+`vex sync github` pulls issues and PRs down as local Markdown. Subsequent searches return implementation alongside the discussions that motivated it — design docs, PR threads, bug reports — ranked by relevance. Credentials are only needed during sync; search runs locally.
 
-The CLI exposes the usual dials: `-k N` for result count, `-g "*.cs"` to constrain by glob, `--literal mutex` to pin a keyword boost, `-t 0.3` to floor similarity, `--json` for machine output, `--fast` for binary quantization on very large trees, `--device npu` on supported hardware.
+```bash
+vex sync github                          # auto-detect repo from git remote
+vex "why did we change the auth flow"   # code + issue + PR results, ranked
+```
+
+## Pipeline
+
+1. Walk files in parallel (`.gitignore` / `.vexignore` aware)
+2. Score files by keyword overlap — skip zero-overlap files
+3. Chunk top files: tree-sitter at function/class boundaries for Rust, Python, JavaScript, TypeScript, Go, C, C++, Java, C#; paragraph/sliding-window for prose
+4. BM25 pre-filter → top ~50 candidates
+5. Embed query + candidates with `all-MiniLM-L6-v2` via ONNX Runtime (CPU by default; `--device npu` on supported Qualcomm hardware)
+6. Rank by cosine similarity, return top-k
+
+## Claude Code integration
+
+The repo ships a `/vex` Claude Code skill (`skills/vex/SKILL.md`) that teaches agents to use semantic search effectively: synonym expansion via `--literal`, follow-up queries from multiple angles, flow tracing from top results. One `vex` call typically replaces 10–15 grep/glob/Read calls, saving context window and tokens.
 
 ## Getting started
 
-`cargo install --git https://github.com/calumjs/vex` installs the binary. The embedding model (~23 MB) downloads automatically on first run. See the [README](https://github.com/calumjs/vex#install) for PATH setup and for the optional `/vex` [Claude Code](https://claude.com/claude-code) skill — a slash command that teaches agents to use vex effectively (synonym expansion, follow-up queries, flow tracing). One `vex` call typically replaces ten-to-fifteen grep/glob/read calls from an agent.
+```bash
+cargo install --git https://github.com/calumjs/vex
+```
+
+The embedding model (~23 MB quantized) downloads on first run. See the [README](https://github.com/calumjs/vex#install) for PATH setup and the full CLI reference.
 
 ## Further reading
 
-- [Journal](./journal/) — what has shipped, week by week
+- [Journal](./journal/) — what has shipped
 - [Status](./status/) — currently-open issues
 - [Source](https://github.com/calumjs/vex) — the repo itself
