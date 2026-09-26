@@ -2,47 +2,53 @@
 title: "vex"
 tagline: "Vector Examine — semantic grep for code and engineering context"
 generatedBy: "docent"
-generatedAt: "2026-04-19T05:07:55Z"
-mode: "init"
+generatedAt: "2026-09-26T22:15:48Z"
+mode: "update"
 sourceFiles:
   - path: "README.md"
     sha: "94605712f6e9e2b400e5f8d04499a438428c1803"
-bodyHash: "e854f5ae20bb823c624cfb80c2b05e2b500aa948443a75ecea9e1dabeda5c0b9"
+bodyHash: "189c5e0672e3b6afe2ba0ca48d6129fe8fe9519d8ced1048881cd75d14b507c6"
 ---
 
-`vex` is a command-line tool written in Rust that searches code and engineering context by meaning, not by token. A single binary, no index, no server, no background daemon. Point it at a directory, ask a question in plain English, and get ranked results in under a second.
-
-```
-vex "database connection pooling" src/
-```
+`vex` searches code and engineering context by meaning, not by token. A Rust CLI binary — `cargo install --git https://github.com/calumjs/vex` — that walks files, embeds your query and candidates with an INT8-quantized `all-MiniLM-L6-v2` model, and returns ranked results in under a second. No pre-indexing, no background process. Point it at a directory and ask a question.
 
 ## The problem it solves
 
-Keyword search — `grep`, `ripgrep`, most editor search — assumes you already know the vocabulary the code uses. On any non-trivial codebase, you often don't. A search for `retry` misses `fetch_with_backoff`. A search for `authentication` misses the PR discussion about session handling. The context exists; the words are different; `grep` can't bridge the gap.
+Keyword search assumes you already know the words the code uses. A search for `retry` misses `fetch_with_backoff`. A search for `authentication` misses the PR discussion about session management. The vocabulary gap is consistent and hard to work around with grep flags.
 
-`vex` closes the gap by embedding your query and the candidate chunks with a small local neural model and ranking by cosine similarity. The same invocation also searches GitHub issues and PRs when you've synced them (`vex sync github`), so a single query returns the implementation and the discussions that motivated it side by side.
+The gap is larger on AI-assisted workflows. When Claude Code or another agent is navigating a codebase, context that can't be found can't be used — decisions get repeated, bugs get reintroduced, and the reasoning behind a design stays buried in a GitHub issue nobody links to.
+
+`vex` also syncs GitHub issues and PRs as local Markdown, so engineering discussions are searchable alongside code. Run `vex sync github` once; every subsequent search includes them. A query like `"why did we change the auth flow"` returns the PR discussion, the ADR, and the implementation — together, ranked by relevance.
 
 ## How it works
 
-Each query runs a short pipeline:
+A search invocation runs six stages:
 
-1. Walk files respecting `.gitignore` and `.vexignore`.
-2. Score files by keyword overlap with the query. Files with zero overlap are dropped.
-3. Chunk the top files — tree-sitter for supported languages (Rust, Python, JavaScript, TypeScript, Go, C, C++, Java, C#), paragraph/sliding-window for prose.
-4. BM25 pre-filter narrows the pool to the top candidates.
-5. Embed query and candidates with `all-MiniLM-L6-v2` (384-dim, INT8 quantized) via ONNX Runtime.
-6. Rank by cosine similarity; return top-k.
+1. Walk files in parallel, respecting `.gitignore` and `.vexignore`.
+2. Score files by keyword overlap — files with zero overlap are dropped early.
+3. Chunk top files using tree-sitter at function/class boundaries (Rust, Python, JS/TS, Go, C, C++, Java, C#), or paragraph-split for prose and Markdown.
+4. BM25 pre-filter narrows to the top ~50 candidates lexically.
+5. Embed query and candidates with `all-MiniLM-L6-v2` (384-dim, INT8, ONNX Runtime).
+6. Rank by cosine similarity, return top-k.
 
-Steps 2–4 discard more than 99% of chunks before the neural model sees anything. That is what makes query-time embedding viable: a 19k-file monorepo returns cold in 729ms on a Snapdragon X Elite.
-
-The CLI exposes the usual dials: `-k N` for result count, `-g "*.cs"` to constrain by glob, `--literal mutex` to pin a keyword boost, `-t 0.3` to floor similarity, `--json` for machine output, `--fast` for binary quantization on very large trees, `--device npu` on supported hardware.
+Steps 2–4 eliminate >99% of chunks before the neural model runs, which is why pre-indexing isn't needed. On a 19,000-file monorepo (35,000 chunks), cold search takes ~729ms on Snapdragon X Elite.
 
 ## Getting started
 
-`cargo install --git https://github.com/calumjs/vex` installs the binary. The embedding model (~23 MB) downloads automatically on first run. See the [README](https://github.com/calumjs/vex#install) for PATH setup and for the optional `/vex` [Claude Code](https://claude.com/claude-code) skill — a slash command that teaches agents to use vex effectively (synonym expansion, follow-up queries, flow tracing). One `vex` call typically replaces ten-to-fifteen grep/glob/read calls from an agent.
+```bash
+# Install
+cargo install --git https://github.com/calumjs/vex
 
-## Further reading
+# Search current directory
+vex "database connection pooling"
 
-- [Journal](./journal/) — what has shipped, week by week
-- [Status](./status/) — currently-open issues
-- [Source](https://github.com/calumjs/vex) — the repo itself
+# Sync GitHub issues, then search code and issues together
+vex sync github
+vex "resilience strategy for upstream timeouts"
+```
+
+See the [README](https://github.com/calumjs/vex#install) for platform-specific PATH setup and the full options reference. The `/vex` Claude Code skill (`skills/vex/SKILL.md`) teaches Claude synonym expansion, follow-up queries, and flow tracing — copy it to `~/.claude/skills/vex/` or clone the repo.
+
+---
+
+Track open work on the <a href={`${import.meta.env.BASE_URL}status/`}>status page</a> or read recent development in the <a href={`${import.meta.env.BASE_URL}journal/`}>journal</a>.
